@@ -1,6 +1,6 @@
 use monty::{DictPairs, ExcType, MontyObject};
 use num_bigint::BigInt;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::{BridgeError, BridgeResult};
 
@@ -248,7 +248,7 @@ fn parse_named_tuple(value: Value) -> BridgeResult<MontyObject> {
         _ => {
             return Err(BridgeError::Message(
                 "$named_tuple must be an object".into(),
-            ))
+            ));
         }
     };
     let type_name = map

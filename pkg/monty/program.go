@@ -5,6 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
+
+	"github.com/tetratelabs/wazero/api"
 )
 
 type Program struct {
@@ -58,11 +62,12 @@ func (p *Program) Close(ctx context.Context) {
 }
 
 type Call struct {
-	Name       string
-	Args       []Value
-	Kwargs     []KeywordArg
-	MethodCall bool
-	resume     *snapshotResume
+	Name         string
+	Args         []Value
+	Kwargs       []KeywordArg
+	MethodCall   bool
+	snapshotType string
+	resume       *snapshotResume
 }
 
 func (c *Call) Dump(ctx context.Context) ([]byte, error) {
@@ -100,10 +105,11 @@ func (c *Call) Defer(ctx context.Context) (Progress, error) {
 }
 
 type OSCall struct {
-	Name   string
-	Args   []Value
-	Kwargs []KeywordArg
-	resume *snapshotResume
+	Name         string
+	Args         []Value
+	Kwargs       []KeywordArg
+	snapshotType string
+	resume       *snapshotResume
 }
 
 func (c *OSCall) Dump(ctx context.Context) ([]byte, error) {
@@ -253,9 +259,10 @@ func (r *Runtime) LoadPendingFutures(ctx context.Context, data []byte, pendingID
 }
 
 type snapshotResume struct {
-	rt         *Runtime
-	snapshotID uint64
-	callID     uint32
+	rt           *Runtime
+	snapshotID   uint64
+	callID       uint32
+	snapshotType string
 }
 
 func (s *snapshotResume) dump(ctx context.Context) ([]byte, error) {
@@ -289,7 +296,13 @@ func (s *snapshotResume) resumeResult(ctx context.Context, result any) (Progress
 		return Progress{}, err
 	}
 	defer done()
-	progress, err := s.rt.callProgress(ctx, s.rt.fnSnapshotResume, s.snapshotID, uint64(s.callID), 0, arg.ptr, arg.len, 0, 0)
+	typeJSON := fmt.Sprintf(`"%s"`, s.snapshotType)
+	typeArg, typeDone, err := s.rt.arg(ctx, []byte(typeJSON))
+	if err != nil {
+		return Progress{}, err
+	}
+	defer typeDone()
+	progress, err := s.rt.callProgress(ctx, s.rt.fnSnapshotResume, s.snapshotID, uint64(s.callID), 0, arg.ptr, arg.len, 0, 0, typeArg.ptr, typeArg.len)
 	if err != nil {
 		return Progress{}, err
 	}
@@ -306,7 +319,13 @@ func (s *snapshotResume) resumeError(ctx context.Context, message string) (Progr
 		return Progress{}, err
 	}
 	defer done()
-	progress, err := s.rt.callProgress(ctx, s.rt.fnSnapshotResume, s.snapshotID, uint64(s.callID), 1, 0, 0, arg.ptr, arg.len)
+	typeJSON := fmt.Sprintf(`"%s"`, s.snapshotType)
+	typeArg, typeDone, err := s.rt.arg(ctx, []byte(typeJSON))
+	if err != nil {
+		return Progress{}, err
+	}
+	defer typeDone()
+	progress, err := s.rt.callProgress(ctx, s.rt.fnSnapshotResume, s.snapshotID, uint64(s.callID), 1, 0, 0, arg.ptr, arg.len, typeArg.ptr, typeArg.len)
 	if err != nil {
 		return Progress{}, err
 	}
@@ -318,10 +337,260 @@ func (s *snapshotResume) resumeFuture(ctx context.Context) (Progress, error) {
 	if s.snapshotID == 0 {
 		return Progress{}, errors.New("monty: closed snapshot")
 	}
-	progress, err := s.rt.callProgress(ctx, s.rt.fnSnapshotResume, s.snapshotID, uint64(s.callID), 2, 0, 0, 0, 0)
+	typeJSON := fmt.Sprintf(`"%s"`, s.snapshotType)
+	typeArg, typeDone, err := s.rt.arg(ctx, []byte(typeJSON))
+	if err != nil {
+		return Progress{}, err
+	}
+	defer typeDone()
+	progress, err := s.rt.callProgress(ctx, s.rt.fnSnapshotResume, s.snapshotID, uint64(s.callID), 2, 0, 0, 0, 0, typeArg.ptr, typeArg.len)
 	if err != nil {
 		return Progress{}, err
 	}
 	s.snapshotID = 0
 	return progress, nil
+}
+
+// ============================================================
+// REPL type
+// ============================================================
+
+// Repl provides a stateful incremental REPL with async suspension support.
+type Repl struct {
+	rt *Runtime
+	id uint64
+}
+
+// NewRepl creates a new REPL session.
+func NewRepl(ctx context.Context, rt *Runtime, scriptName string) (*Repl, error) {
+	if scriptName == "" {
+		scriptName = "repl.py"
+	}
+	scriptArg, freeScript, err := rt.arg(ctx, []byte(scriptName))
+	if err != nil {
+		return nil, err
+	}
+	defer freeScript()
+	id, err := rt.callID(ctx, rt.fnReplNew, scriptArg.ptr, scriptArg.len)
+	if err != nil {
+		return nil, err
+	}
+	return &Repl{rt: rt, id: id}, nil
+}
+
+// Start executes code with suspension support.
+func (r *Repl) Start(ctx context.Context, inputs ...any) (ReplProgress, error) {
+	if r == nil || r.rt == nil || r.id == 0 {
+		return ReplProgress{}, errors.New("monty: closed repl")
+	}
+	encoded, err := json.Marshal(inputs)
+	if err != nil {
+		return ReplProgress{}, fmt.Errorf("monty: encode inputs: %w", err)
+	}
+	inputArg, done, err := r.rt.arg(ctx, encoded)
+	if err != nil {
+		return ReplProgress{}, err
+	}
+	defer done()
+	// Use empty input names (positional inputs)
+	inputNamesJSON := "[]"
+	namesArg, doneNames, err := r.rt.arg(ctx, []byte(inputNamesJSON))
+	if err != nil {
+		return ReplProgress{}, err
+	}
+	defer doneNames()
+	id, err := r.rt.callID(ctx, r.rt.fnReplStart, r.id, inputArg.ptr, inputArg.len, namesArg.ptr, namesArg.len)
+	if err != nil {
+		return ReplProgress{}, err
+	}
+	if id == 0 {
+		// Check for ReplStartError - the repl_id is stored in last_error
+		msg, readErr := r.rt.lastError(ctx)
+		if readErr != nil {
+			return ReplProgress{}, readErr
+		}
+		if msg == "" {
+			msg = "unknown error"
+		}
+		// Try to extract new repl_id from the error message (format: "error (repl_id=123)")
+		newReplID := r.id
+		if idx := strings.LastIndex(msg, "repl_id="); idx != -1 {
+			if endIdx := strings.Index(msg[idx+8:], ")"); endIdx != -1 {
+				if idStr := msg[idx+8 : idx+8+endIdx]; idStr != "" {
+					if parsed, err := strconv.ParseUint(idStr, 10, 64); err == nil {
+						newReplID = parsed
+					}
+				}
+			}
+		}
+		return ReplProgress{}, &ReplStartError{Message: msg, ReplID: newReplID}
+	}
+	return r.rt.decodeReplProgressFromBlob(id)
+}
+
+// Resume resumes from a progress snapshot.
+func (r *Repl) Resume(ctx context.Context, progress ReplProgress, result any) (ReplProgress, error) {
+	if r == nil || r.rt == nil || r.id == 0 {
+		return ReplProgress{}, errors.New("monty: closed repl")
+	}
+	if progress.Kind == ReplProgressComplete {
+		return progress, nil
+	}
+	var resultJSON []byte
+	switch result := result.(type) {
+	case string:
+		resultJSON = []byte(result)
+	case []byte:
+		resultJSON = result
+	default:
+		var err error
+		resultJSON, err = json.Marshal(result)
+		if err != nil {
+			return ReplProgress{}, fmt.Errorf("monty: encode result: %w", err)
+		}
+	}
+	arg, done, err := r.rt.arg(ctx, resultJSON)
+	if err != nil {
+		return ReplProgress{}, err
+	}
+	defer done()
+	var snapshotID uint64
+	switch progress.Kind {
+	case ReplProgressFunctionCall:
+		if progress.Call != nil {
+			snapshotID = progress.Call.snapshotID
+		}
+	case ReplProgressOsCall:
+		if progress.OS != nil {
+			snapshotID = progress.OS.snapshotID
+		}
+	case ReplProgressNameLookup:
+		if progress.NameLookup != nil {
+			snapshotID = progress.NameLookup.snapshotID
+		}
+	case ReplProgressResolveFutures:
+		if progress.Futures != nil {
+			snapshotID = progress.Futures.snapshotID
+		}
+	}
+	id, err := r.rt.callID(ctx, r.rt.fnReplResume, snapshotID, arg.ptr, arg.len)
+	if err != nil {
+		return ReplProgress{}, err
+	}
+	if id == 0 {
+		msg, _ := r.rt.lastError(ctx)
+		return ReplProgress{}, &ReplStartError{Message: msg, ReplID: r.id}
+	}
+	return r.rt.decodeReplProgressFromBlob(id)
+}
+
+// Feed executes code synchronously (no suspension).
+func (r *Repl) Feed(ctx context.Context, code string) (Value, error) {
+	if r == nil || r.rt == nil || r.id == 0 {
+		return nil, errors.New("monty: closed repl")
+	}
+	codeArg, done, err := r.rt.arg(ctx, []byte(code))
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	id, err := r.rt.callID(ctx, r.rt.fnReplFeed, r.id, codeArg.ptr, codeArg.len)
+	if err != nil {
+		return nil, err
+	}
+	if id == 0 {
+		return nil, nil // None result
+	}
+	buf, err := r.rt.readBlob(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return Value(buf), nil
+}
+
+// CheckContinuation checks if code is complete or needs more input.
+func (r *Repl) CheckContinuation(code string) ReplContinuationMode {
+	if r == nil || r.rt == nil {
+		return ReplComplete
+	}
+	codeArg, done, err := r.rt.arg(context.Background(), []byte(code))
+	if err != nil {
+		return ReplComplete
+	}
+	defer done()
+	mode, err := r.rt.callUint64(r.rt.fnReplCheckContinuation, codeArg.ptr, codeArg.len)
+	if err != nil {
+		return ReplComplete
+	}
+	return ReplContinuationMode(mode)
+}
+
+// Dump serializes the REPL state.
+func (r *Repl) Dump(ctx context.Context) ([]byte, error) {
+	if r == nil || r.rt == nil || r.id == 0 {
+		return nil, errors.New("monty: closed repl")
+	}
+	blobID, err := r.rt.callID(ctx, r.rt.fnReplDump, r.id)
+	if err != nil {
+		return nil, err
+	}
+	return r.rt.readBlob(ctx, blobID)
+}
+
+// Load deserializes REPL state from bytes.
+func (r *Repl) Load(ctx context.Context, data []byte) error {
+	if r == nil || r.rt == nil {
+		return errors.New("monty: nil runtime")
+	}
+	arg, done, err := r.rt.arg(ctx, data)
+	if err != nil {
+		return err
+	}
+	defer done()
+	id, err := r.rt.callID(ctx, r.rt.fnReplLoad, arg.ptr, arg.len)
+	if err != nil {
+		return err
+	}
+	r.id = id
+	return nil
+}
+
+// Close releases the REPL.
+func (r *Repl) Close() {
+	if r != nil && r.rt != nil && r.id != 0 {
+		r.rt.fnReplFree.Call(context.Background(), r.id)
+		r.id = 0
+	}
+}
+
+// callUint64 calls a function and returns the result as uint64.
+func (r *Runtime) callUint64(fn api.Function, params ...uint64) (uint64, error) {
+	res, err := fn.Call(context.Background(), params...)
+	if err != nil {
+		return 0, err
+	}
+	return res[0], nil
+}
+
+// decodeReplProgressFromBlob reads a blob and decodes it as ReplProgress.
+func (r *Runtime) decodeReplProgressFromBlob(blobID uint64) (ReplProgress, error) {
+	defer r.fnBlobFree.Call(context.Background(), blobID)
+	ptrRes, err := r.fnBlobPtr.Call(context.Background(), blobID)
+	if err != nil {
+		return ReplProgress{}, fmt.Errorf("monty: blob ptr call: %w", err)
+	}
+	lenRes, err := r.fnBlobLen.Call(context.Background(), blobID)
+	if err != nil {
+		return ReplProgress{}, fmt.Errorf("monty: blob len call: %w", err)
+	}
+	ptr := uint32(ptrRes[0])
+	length := uint32(lenRes[0])
+	if length == 0 {
+		return ReplProgress{}, errors.New("monty: empty repl progress blob")
+	}
+	data, ok := r.memory.Read(ptr, length)
+	if !ok {
+		return ReplProgress{}, errors.New("monty: failed reading repl progress memory")
+	}
+	return r.decodeReplProgress(data)
 }

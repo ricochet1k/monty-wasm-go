@@ -38,9 +38,26 @@ type Runtime struct {
 	fnRunFree            api.Function
 	fnSnapshotFree       api.Function
 	fnFutureSnapshotFree api.Function
+	fnNameLookupDump     api.Function
+	fnNameLookupLoad     api.Function
+	fnNameLookupFree     api.Function
 	fnBlobPtr            api.Function
 	fnBlobLen            api.Function
 	fnBlobFree           api.Function
+
+	// REPL functions
+	fnReplCheckContinuation api.Function
+	fnReplNew               api.Function
+	fnReplStart             api.Function
+	fnReplResume            api.Function
+	fnReplFeed              api.Function
+	fnReplDump              api.Function
+	fnReplLoad              api.Function
+	fnReplFree              api.Function
+	fnReplProgressFree      api.Function
+	fnReplSnapshotDump      api.Function
+	fnReplSnapshotLoad      api.Function
+	fnReplSnapshotFree      api.Function
 }
 
 func NewRuntime(ctx context.Context) (*Runtime, error) {
@@ -85,18 +102,10 @@ func (r *Runtime) Compile(ctx context.Context, code string, options CompileOptio
 	if inputNames == nil {
 		inputNames = []string{}
 	}
-	externalFunctions := options.ExternalFunctions
-	if externalFunctions == nil {
-		externalFunctions = []string{}
-	}
 
 	inputJSON, err := json.Marshal(inputNames)
 	if err != nil {
 		return nil, fmt.Errorf("monty: encode input names: %w", err)
-	}
-	extJSON, err := json.Marshal(externalFunctions)
-	if err != nil {
-		return nil, fmt.Errorf("monty: encode external funcs: %w", err)
 	}
 
 	codeArg, freeCode, err := r.arg(ctx, []byte(code))
@@ -114,13 +123,8 @@ func (r *Runtime) Compile(ctx context.Context, code string, options CompileOptio
 		return nil, err
 	}
 	defer freeInputs()
-	extArg, freeExt, err := r.arg(ctx, extJSON)
-	if err != nil {
-		return nil, err
-	}
-	defer freeExt()
 
-	runID, err := r.callID(ctx, r.fnRunNew, codeArg.ptr, codeArg.len, scriptArg.ptr, scriptArg.len, inputsArg.ptr, inputsArg.len, extArg.ptr, extArg.len)
+	runID, err := r.callID(ctx, r.fnRunNew, codeArg.ptr, codeArg.len, scriptArg.ptr, scriptArg.len, inputsArg.ptr, inputsArg.len)
 	if err != nil {
 		return nil, err
 	}
@@ -165,6 +169,7 @@ func (r *Runtime) decodeProgress(payload []byte) (Progress, error) {
 		SnapshotID       uint64              `json:"snapshot_id"`
 		PendingCallIDs   []uint32            `json:"pending_call_ids"`
 		FutureSnapshotID uint64              `json:"future_snapshot_id"`
+		Name             string              `json:"name"`
 	}
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		return Progress{}, fmt.Errorf("monty: decode progress: %w", err)
@@ -178,19 +183,21 @@ func (r *Runtime) decodeProgress(payload []byte) (Progress, error) {
 	case "function_call":
 		progress.Kind = KindFunctionCall
 		progress.Call = &Call{
-			Name:       raw.FunctionName,
-			Args:       rawToValues(raw.Args),
-			Kwargs:     rawToKwargs(raw.Kwargs),
-			MethodCall: raw.MethodCall,
-			resume:     &snapshotResume{rt: r, snapshotID: raw.SnapshotID, callID: raw.CallID},
+			Name:         raw.FunctionName,
+			Args:         rawToValues(raw.Args),
+			Kwargs:       rawToKwargs(raw.Kwargs),
+			MethodCall:   raw.MethodCall,
+			snapshotType: "function_call",
+			resume:       &snapshotResume{rt: r, snapshotID: raw.SnapshotID, callID: raw.CallID, snapshotType: "function_call"},
 		}
 	case "os_call":
 		progress.Kind = KindOSCall
 		progress.OSCall = &OSCall{
-			Name:   raw.OSFunction,
-			Args:   rawToValues(raw.Args),
-			Kwargs: rawToKwargs(raw.Kwargs),
-			resume: &snapshotResume{rt: r, snapshotID: raw.SnapshotID, callID: raw.CallID},
+			Name:         raw.OSFunction,
+			Args:         rawToValues(raw.Args),
+			Kwargs:       rawToKwargs(raw.Kwargs),
+			snapshotType: "os_call",
+			resume:       &snapshotResume{rt: r, snapshotID: raw.SnapshotID, callID: raw.CallID, snapshotType: "os_call"},
 		}
 	case "resolve_futures":
 		progress.Kind = KindResolveFutures
@@ -199,10 +206,96 @@ func (r *Runtime) decodeProgress(payload []byte) (Progress, error) {
 			rt:         r,
 			snapshotID: raw.FutureSnapshotID,
 		}
+	case "name_lookup":
+		progress.Kind = KindNameLookup
+		progress.NameLookup = &NameLookup{
+			Name:       raw.Name,
+			snapshotID: raw.SnapshotID,
+			rt:         r,
+		}
 	default:
 		return Progress{}, fmt.Errorf("monty: unknown progress kind %q", raw.Kind)
 	}
 	return progress, nil
+}
+
+// decodeReplProgress decodes REPL progress from JSON.
+func (r *Runtime) decodeReplProgress(payload []byte) (ReplProgress, error) {
+	var raw struct {
+		Kind             string              `json:"kind"`
+		Result           json.RawMessage     `json:"result"`
+		FunctionName     string              `json:"function_name"`
+		OSFunction       string              `json:"os_function"`
+		Args             []json.RawMessage   `json:"args"`
+		Kwargs           [][]json.RawMessage `json:"kwargs"`
+		CallID           uint32              `json:"call_id"`
+		MethodCall       bool                `json:"method_call"`
+		SnapshotID       uint64              `json:"snapshot_id"`
+		PendingCallIDs   []uint32            `json:"pending_call_ids"`
+		FutureSnapshotID uint64              `json:"future_snapshot_id"`
+		Name             string              `json:"name"`
+	}
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return ReplProgress{}, fmt.Errorf("monty: decode repl progress: %w", err)
+	}
+
+	progress := ReplProgress{}
+	switch raw.Kind {
+	case "complete":
+		progress.Kind = ReplProgressComplete
+		progress.Result = append(Value{}, raw.Result...)
+	case "function_call":
+		progress.Kind = ReplProgressFunctionCall
+		progress.Call = &ReplFunctionCall{
+			FunctionName: raw.FunctionName,
+			Args:         rawToValues(raw.Args),
+			Kwargs:       rawToKwargs(raw.Kwargs),
+			CallID:       raw.CallID,
+			MethodCall:   raw.MethodCall,
+			snapshotID:   raw.SnapshotID,
+			rt:           r,
+		}
+	case "os_call":
+		progress.Kind = ReplProgressOsCall
+		progress.OS = &ReplOsCall{
+			OSFunction: raw.OSFunction,
+			Args:       rawToValues(raw.Args),
+			Kwargs:     rawToKwargs(raw.Kwargs),
+			CallID:     raw.CallID,
+			snapshotID: raw.SnapshotID,
+			rt:         r,
+		}
+	case "resolve_futures":
+		progress.Kind = ReplProgressResolveFutures
+		progress.Futures = &ReplResolveFutures{
+			PendingCallIDs: append([]uint32(nil), raw.PendingCallIDs...),
+			snapshotID:     raw.FutureSnapshotID,
+			rt:             r,
+		}
+	case "name_lookup":
+		progress.Kind = ReplProgressNameLookup
+		progress.NameLookup = &ReplNameLookup{
+			Name:       raw.Name,
+			snapshotID: raw.SnapshotID,
+			rt:         r,
+		}
+	default:
+		return ReplProgress{}, fmt.Errorf("monty: unknown repl progress kind %q", raw.Kind)
+	}
+	return progress, nil
+}
+
+// callReplProgress calls a REPL function and decodes the result as ReplProgress.
+func (r *Runtime) callReplProgress(ctx context.Context, fn api.Function, progressType uint32, params ...uint64) (ReplProgress, error) {
+	id, err := r.callID(ctx, fn, append([]uint64{uint64(progressType)}, params...)...)
+	if err != nil {
+		return ReplProgress{}, err
+	}
+	buf, err := r.readBlob(ctx, id)
+	if err != nil {
+		return ReplProgress{}, err
+	}
+	return r.decodeReplProgress(buf)
 }
 
 func rawToValues(items []json.RawMessage) []Value {
@@ -332,9 +425,25 @@ func (r *Runtime) cacheFunctions() error {
 		"monty_run_free":               &r.fnRunFree,
 		"monty_snapshot_free":          &r.fnSnapshotFree,
 		"monty_future_snapshot_free":   &r.fnFutureSnapshotFree,
+		"monty_name_lookup_dump":       &r.fnNameLookupDump,
+		"monty_name_lookup_load":       &r.fnNameLookupLoad,
+		"monty_name_lookup_free":       &r.fnNameLookupFree,
 		"monty_blob_ptr":               &r.fnBlobPtr,
 		"monty_blob_len":               &r.fnBlobLen,
 		"monty_blob_free":              &r.fnBlobFree,
+		// REPL functions
+		"monty_repl_check_continuation": &r.fnReplCheckContinuation,
+		"monty_repl_new":                &r.fnReplNew,
+		"monty_repl_start":              &r.fnReplStart,
+		"monty_repl_resume":             &r.fnReplResume,
+		"monty_repl_feed":               &r.fnReplFeed,
+		"monty_repl_dump":               &r.fnReplDump,
+		"monty_repl_load":               &r.fnReplLoad,
+		"monty_repl_free":               &r.fnReplFree,
+		"monty_repl_progress_free":      &r.fnReplProgressFree,
+		"monty_repl_snapshot_dump":      &r.fnReplSnapshotDump,
+		"monty_repl_snapshot_load":      &r.fnReplSnapshotLoad,
+		"monty_repl_snapshot_free":      &r.fnReplSnapshotFree,
 	}
 	for name, dest := range required {
 		fn := r.mod.ExportedFunction(name)

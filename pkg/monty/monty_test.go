@@ -33,8 +33,7 @@ func TestFunctionCallResume(t *testing.T) {
 	rt := newRuntime(t, ctx)
 
 	prog, err := rt.Compile(ctx, "external_add(x, 10) * 2", CompileOptions{
-		InputNames:        []string{"x"},
-		ExternalFunctions: []string{"external_add"},
+		InputNames: []string{"x"},
 	})
 	if err != nil {
 		t.Fatalf("compile: %v", err)
@@ -45,6 +44,29 @@ func TestFunctionCallResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
+	// The interpreter may return either NameLookup or FunctionCall
+	// depending on how it handles external function resolution
+	if progress.Kind == KindNameLookup {
+		// NameLookup first, then FunctionCall
+		if progress.NameLookup == nil {
+			t.Fatalf("expected name lookup payload")
+		}
+		if progress.NameLookup.Name != "external_add" {
+			t.Fatalf("expected external_add, got %q", progress.NameLookup.Name)
+		}
+		// Resume with a function that adds 10
+		next, err := progress.NameLookup.Resume(ctx, func(args ...any) any {
+			a := args[0].(int)
+			b := args[1].(int)
+			return a + b
+		})
+		if err != nil {
+			t.Fatalf("resume name lookup: %v", err)
+		}
+		progress = next
+	}
+
+	// Now expect FunctionCall
 	if progress.Kind != KindFunctionCall {
 		t.Fatalf("expected function call, got %v", progress.Kind)
 	}
