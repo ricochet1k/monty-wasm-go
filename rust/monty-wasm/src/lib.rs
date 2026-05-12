@@ -9,6 +9,7 @@ use json::{
     decode_inputs, decode_object, decode_value, encode_kwargs, encode_object, encode_objects,
 };
 use monty::{
+    bytecode::CallLocation,
     ExcType, ExtFunctionResult, FunctionCall, MontyException, MontyObject, MontyRepl, MontyRun,
     NameLookup, NameLookupResult, NoLimitTracker, OsCall, PrintWriter, ReplContinuationMode,
     ReplProgress, ResolveFutures, RunProgress, detect_repl_continuation_mode,
@@ -146,12 +147,13 @@ fn encode_progress(state: &mut State, progress: RunProgress<NoLimitTracker>) -> 
             "kind": "complete",
             "result": serde_json::from_str::<Value>(&encode_object(&value)?)?,
         }),
-        RunProgress::FunctionCall(fc) => {
+       RunProgress::FunctionCall(fc) => {
             let fn_name = fc.function_name.clone();
             let args_json = encode_objects(&fc.args)?;
             let kwargs_json = encode_kwargs(&fc.kwargs)?;
             let call_id = fc.call_id;
             let method_call = fc.method_call;
+            let location = fc.location();
             let snapshot_id = state.alloc_id();
             state
                 .function_snapshots
@@ -164,13 +166,15 @@ fn encode_progress(state: &mut State, progress: RunProgress<NoLimitTracker>) -> 
                 "call_id": call_id,
                 "method_call": method_call,
                 "snapshot_id": snapshot_id,
+                "location": location,
             })
         }
-        RunProgress::OsCall(os_call) => {
+      RunProgress::OsCall(os_call) => {
             let fn_name = os_call.function.to_string();
             let args_json = encode_objects(&os_call.args)?;
             let kwargs_json = encode_kwargs(&os_call.kwargs)?;
             let call_id = os_call.call_id;
+            let location = os_call.location();
             let snapshot_id = state.alloc_id();
             state
                 .function_snapshots
@@ -182,6 +186,7 @@ fn encode_progress(state: &mut State, progress: RunProgress<NoLimitTracker>) -> 
                 "kwargs": serde_json::from_str::<Value>(&kwargs_json)?,
                 "call_id": call_id,
                 "snapshot_id": snapshot_id,
+                "location": location,
             })
         }
         RunProgress::ResolveFutures(snapshot) => {
@@ -224,12 +229,13 @@ fn encode_repl_progress(
                 "result": serde_json::from_str::<Value>(&result_json)?,
             })
         }
-        ReplProgress::FunctionCall(fc) => {
+      ReplProgress::FunctionCall(fc) => {
             let fn_name = fc.function_name.clone();
             let args_json = encode_objects(&fc.args)?;
             let kwargs_json = encode_kwargs(&fc.kwargs)?;
             let call_id = fc.call_id;
             let method_call = fc.method_call;
+            let location = fc.location();
             let snapshot_id = state.alloc_id();
             state
                 .repl_progress
@@ -242,13 +248,15 @@ fn encode_repl_progress(
                 "call_id": call_id,
                 "method_call": method_call,
                 "snapshot_id": snapshot_id,
+                "location": location,
             })
         }
-        ReplProgress::OsCall(os_call) => {
+     ReplProgress::OsCall(os_call) => {
             let fn_name = os_call.function.to_string();
             let args_json = encode_objects(&os_call.args)?;
             let kwargs_json = encode_kwargs(&os_call.kwargs)?;
             let call_id = os_call.call_id;
+            let location = os_call.location();
             let snapshot_id = state.alloc_id();
             state
                 .repl_progress
@@ -260,6 +268,7 @@ fn encode_repl_progress(
                 "kwargs": serde_json::from_str::<Value>(&kwargs_json)?,
                 "call_id": call_id,
                 "snapshot_id": snapshot_id,
+                "location": location,
             })
         }
         ReplProgress::ResolveFutures(snapshot) => {

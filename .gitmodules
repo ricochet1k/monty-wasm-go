@@ -1,0 +1,3 @@
+[submodule "rust/monty"]
+	path = rust/monty
+	url = https://github.com/pydantic/monty.git

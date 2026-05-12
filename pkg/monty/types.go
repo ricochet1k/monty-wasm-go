@@ -145,6 +145,7 @@ type ReplFunctionCall struct {
 	Kwargs       []KeywordArg
 	CallID       uint32
 	MethodCall   bool
+	Location     *CallLocation
 	snapshotID   uint64
 	rt           *Runtime
 }
@@ -215,6 +216,7 @@ type ReplOsCall struct {
 	Args       []Value
 	Kwargs     []KeywordArg
 	CallID     uint32
+	Location   *CallLocation
 	snapshotID uint64
 	rt         *Runtime
 }

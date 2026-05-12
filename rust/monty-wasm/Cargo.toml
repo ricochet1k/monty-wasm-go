@@ -7,9 +7,9 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-monty = { git = "https://github.com/pydantic/monty", rev = "1346bad" }
+monty = { path = "../monty/crates/monty" }
 num-bigint = "0.4"
 postcard = { version = "1", features = ["alloc"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-thiserror = "1"
+thiserror = "2.0.18"

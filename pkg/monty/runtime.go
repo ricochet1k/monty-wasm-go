@@ -170,6 +170,7 @@ func (r *Runtime) decodeProgress(payload []byte) (Progress, error) {
 		PendingCallIDs   []uint32            `json:"pending_call_ids"`
 		FutureSnapshotID uint64              `json:"future_snapshot_id"`
 		Name             string              `json:"name"`
+		Location         *CallLocation       `json:"location"`
 	}
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		return Progress{}, fmt.Errorf("monty: decode progress: %w", err)
@@ -187,6 +188,7 @@ func (r *Runtime) decodeProgress(payload []byte) (Progress, error) {
 			Args:         rawToValues(raw.Args),
 			Kwargs:       rawToKwargs(raw.Kwargs),
 			MethodCall:   raw.MethodCall,
+			Location:     raw.Location,
 			snapshotType: "function_call",
 			resume:       &snapshotResume{rt: r, snapshotID: raw.SnapshotID, callID: raw.CallID, snapshotType: "function_call"},
 		}
@@ -196,6 +198,7 @@ func (r *Runtime) decodeProgress(payload []byte) (Progress, error) {
 			Name:         raw.OSFunction,
 			Args:         rawToValues(raw.Args),
 			Kwargs:       rawToKwargs(raw.Kwargs),
+			Location:     raw.Location,
 			snapshotType: "os_call",
 			resume:       &snapshotResume{rt: r, snapshotID: raw.SnapshotID, callID: raw.CallID, snapshotType: "os_call"},
 		}
@@ -234,6 +237,7 @@ func (r *Runtime) decodeReplProgress(payload []byte) (ReplProgress, error) {
 		PendingCallIDs   []uint32            `json:"pending_call_ids"`
 		FutureSnapshotID uint64              `json:"future_snapshot_id"`
 		Name             string              `json:"name"`
+		Location         *CallLocation       `json:"location"`
 	}
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		return ReplProgress{}, fmt.Errorf("monty: decode repl progress: %w", err)
@@ -252,6 +256,7 @@ func (r *Runtime) decodeReplProgress(payload []byte) (ReplProgress, error) {
 			Kwargs:       rawToKwargs(raw.Kwargs),
 			CallID:       raw.CallID,
 			MethodCall:   raw.MethodCall,
+			Location:     raw.Location,
 			snapshotID:   raw.SnapshotID,
 			rt:           r,
 		}
@@ -262,6 +267,7 @@ func (r *Runtime) decodeReplProgress(payload []byte) (ReplProgress, error) {
 			Args:       rawToValues(raw.Args),
 			Kwargs:     rawToKwargs(raw.Kwargs),
 			CallID:     raw.CallID,
+			Location:   raw.Location,
 			snapshotID: raw.SnapshotID,
 			rt:         r,
 		}

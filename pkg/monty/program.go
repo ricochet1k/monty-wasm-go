@@ -61,11 +61,17 @@ func (p *Program) Close(ctx context.Context) {
 	}
 }
 
+type CallLocation struct {
+	FileName     string
+	FunctionName *string
+}
+
 type Call struct {
 	Name         string
 	Args         []Value
 	Kwargs       []KeywordArg
 	MethodCall   bool
+	Location     *CallLocation
 	snapshotType string
 	resume       *snapshotResume
 }
@@ -108,6 +114,7 @@ type OSCall struct {
 	Name         string
 	Args         []Value
 	Kwargs       []KeywordArg
+	Location     *CallLocation
 	snapshotType string
 	resume       *snapshotResume
 }

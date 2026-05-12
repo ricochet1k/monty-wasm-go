@@ -102,6 +102,152 @@ func TestFunctionCallResume(t *testing.T) {
 	}
 }
 
+func TestFunctionCallLocation(t *testing.T) {
+	ctx := context.Background()
+	rt := newRuntime(t, ctx)
+
+	prog, err := rt.Compile(ctx, "external_add(x, 10) * 2", CompileOptions{
+		InputNames: []string{"x"},
+	})
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	t.Cleanup(func() { prog.Close(ctx) })
+
+	progress, err := prog.Start(ctx, 11)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	// Handle NameLookup if present
+	if progress.Kind == KindNameLookup {
+		if progress.NameLookup == nil {
+			t.Fatalf("expected name lookup payload")
+		}
+		if progress.NameLookup.Name != "external_add" {
+			t.Fatalf("expected external_add, got %q", progress.NameLookup.Name)
+		}
+		next, err := progress.NameLookup.Resume(ctx, func(args ...any) any {
+			a := args[0].(int)
+			b := args[1].(int)
+			return a + b
+		})
+		if err != nil {
+			t.Fatalf("resume name lookup: %v", err)
+		}
+		progress = next
+	}
+
+	// Now expect FunctionCall
+	if progress.Kind != KindFunctionCall {
+		t.Fatalf("expected function call, got %v", progress.Kind)
+	}
+	if progress.Call == nil {
+		t.Fatalf("expected call payload")
+	}
+
+	// The filename should be non-empty (at least the script name)
+	if progress.Call.Location.FileName == "" {
+		t.Fatal("expected non-empty filename in location")
+	}
+
+	// Function name should be "external_add"
+	if progress.Call.Location.FunctionName == nil {
+		t.Fatal("expected function name in location, got nil")
+	}
+	if *progress.Call.Location.FunctionName != "external_add" {
+		t.Fatalf("expected function name 'external_add', got %q", *progress.Call.Location.FunctionName)
+	}
+
+	// Verify the rest of the call works correctly
+	var a, b int
+	if err := progress.Call.Args[0].Decode(&a); err != nil {
+		t.Fatalf("decode arg0: %v", err)
+	}
+	if err := progress.Call.Args[1].Decode(&b); err != nil {
+		t.Fatalf("decode arg1: %v", err)
+	}
+
+	next, err := progress.Call.Return(ctx, a+b)
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if next.Kind != KindComplete {
+		t.Fatalf("expected complete, got %v", next.Kind)
+	}
+
+	var result int
+	if err := next.Result.Decode(&result); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if result != (a+b)*2 {
+		t.Fatalf("expected %d, got %d", (a+b)*2, result)
+	}
+}
+
+func TestReplFunctionCallLocation(t *testing.T) {
+	ctx := context.Background()
+	rt := newRuntime(t, ctx)
+
+	repl, err := NewRepl(ctx, rt, "test.py")
+	if err != nil {
+		t.Fatalf("new repl: %v", err)
+	}
+	t.Cleanup(repl.Close)
+
+	// Start code that calls an external function
+	progress, err := repl.Start(ctx, "external_add(1, 2)")
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	// Expect FunctionCall
+	if progress.Kind != ReplProgressFunctionCall {
+		t.Fatalf("expected function call, got %v", progress.Kind)
+	}
+	if progress.Call == nil {
+		t.Fatalf("expected call payload")
+	}
+
+	// The filename should be non-empty
+	if progress.Call.Location.FileName == "" {
+		t.Fatal("expected non-empty filename in location")
+	}
+
+	// Function name should be "external_add"
+	if progress.Call.Location.FunctionName == nil {
+		t.Fatal("expected function name in location, got nil")
+	}
+	if *progress.Call.Location.FunctionName != "external_add" {
+		t.Fatalf("expected function name 'external_add', got %q", *progress.Call.Location.FunctionName)
+	}
+
+	// Verify the rest of the call works correctly
+	var a, b int
+	if err := progress.Call.Args[0].Decode(&a); err != nil {
+		t.Fatalf("decode arg0: %v", err)
+	}
+	if err := progress.Call.Args[1].Decode(&b); err != nil {
+		t.Fatalf("decode arg1: %v", err)
+	}
+
+	next, err := progress.Call.Return(ctx, a+b)
+	if err != nil {
+		t.Fatalf("return: %v", err)
+	}
+	if next.Kind != ReplProgressComplete {
+		t.Fatalf("expected complete, got %v", next.Kind)
+	}
+
+	var result int
+	if err := next.Result.Decode(&result); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if result != a+b {
+		t.Fatalf("expected %d, got %d", a+b, result)
+	}
+}
+
 func TestProgramDumpLoad(t *testing.T) {
 	ctx := context.Background()
 	rt := newRuntime(t, ctx)
