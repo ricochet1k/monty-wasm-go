@@ -286,8 +286,8 @@ func (r *Runtime) decodeReplProgress(payload []byte) (ReplProgress, error) {
 }
 
 // callReplProgress calls a REPL function and decodes the result as ReplProgress.
-func (r *Runtime) callReplProgress(ctx context.Context, fn api.Function, progressType uint32, params ...uint64) (ReplProgress, error) {
-	id, err := r.callID(ctx, fn, append([]uint64{uint64(progressType)}, params...)...)
+func (r *Runtime) callReplProgress(ctx context.Context, fn api.Function, progressID uint64, progressType uint32, params ...uint64) (ReplProgress, error) {
+	id, err := r.callID(ctx, fn, append([]uint64{progressID, uint64(progressType)}, params...)...)
 	if err != nil {
 		return ReplProgress{}, err
 	}

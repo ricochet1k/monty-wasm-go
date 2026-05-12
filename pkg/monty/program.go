@@ -379,13 +379,23 @@ func NewRepl(ctx context.Context, rt *Runtime, scriptName string) (*Repl, error)
 }
 
 // Start executes code with suspension support.
-func (r *Repl) Start(ctx context.Context, inputs ...any) (ReplProgress, error) {
+func (r *Repl) Start(ctx context.Context, code string, inputs ...any) (ReplProgress, error) {
 	if r == nil || r.rt == nil || r.id == 0 {
 		return ReplProgress{}, errors.New("monty: closed repl")
 	}
-	encoded, err := json.Marshal(inputs)
+	// Encode code string
+	codeArg, doneCode, err := r.rt.arg(ctx, []byte(code))
 	if err != nil {
-		return ReplProgress{}, fmt.Errorf("monty: encode inputs: %w", err)
+		return ReplProgress{}, err
+	}
+	defer doneCode()
+	var encoded []byte
+	if inputs != nil {
+		var err error
+		encoded, err = json.Marshal(inputs)
+		if err != nil {
+			return ReplProgress{}, fmt.Errorf("monty: encode inputs: %w", err)
+		}
 	}
 	inputArg, done, err := r.rt.arg(ctx, encoded)
 	if err != nil {
@@ -399,7 +409,7 @@ func (r *Repl) Start(ctx context.Context, inputs ...any) (ReplProgress, error) {
 		return ReplProgress{}, err
 	}
 	defer doneNames()
-	id, err := r.rt.callID(ctx, r.rt.fnReplStart, r.id, inputArg.ptr, inputArg.len, namesArg.ptr, namesArg.len)
+	id, err := r.rt.callID(ctx, r.rt.fnReplStart, r.id, codeArg.ptr, codeArg.len, namesArg.ptr, namesArg.len, inputArg.ptr, inputArg.len)
 	if err != nil {
 		return ReplProgress{}, err
 	}
@@ -425,12 +435,13 @@ func (r *Repl) Start(ctx context.Context, inputs ...any) (ReplProgress, error) {
 		}
 		return ReplProgress{}, &ReplStartError{Message: msg, ReplID: newReplID}
 	}
+	r.id = 0
 	return r.rt.decodeReplProgressFromBlob(id)
 }
 
 // Resume resumes from a progress snapshot.
 func (r *Repl) Resume(ctx context.Context, progress ReplProgress, result any) (ReplProgress, error) {
-	if r == nil || r.rt == nil || r.id == 0 {
+	if r == nil || r.rt == nil {
 		return ReplProgress{}, errors.New("monty: closed repl")
 	}
 	if progress.Kind == ReplProgressComplete {

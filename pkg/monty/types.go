@@ -186,7 +186,7 @@ func (c *ReplFunctionCall) Return(ctx context.Context, result any) (ReplProgress
 		return ReplProgress{}, err
 	}
 	defer done()
-	return c.rt.callReplProgress(ctx, c.rt.fnReplResume, 0, c.snapshotID, arg.ptr, arg.len)
+	return c.rt.callReplProgress(ctx, c.rt.fnReplResume, c.snapshotID, 0, arg.ptr, arg.len)
 }
 
 // Throw resumes the function call with an error.
@@ -206,7 +206,7 @@ func (c *ReplFunctionCall) Throw(ctx context.Context, message string) (ReplProgr
 		return ReplProgress{}, err
 	}
 	defer done()
-	return c.rt.callReplProgress(ctx, c.rt.fnReplResume, 0, c.snapshotID, arg.ptr, arg.len)
+	return c.rt.callReplProgress(ctx, c.rt.fnReplResume, c.snapshotID, 0, arg.ptr, arg.len)
 }
 
 // ReplOsCall represents a suspended OS call.
@@ -256,7 +256,7 @@ func (c *ReplOsCall) Return(ctx context.Context, result any) (ReplProgress, erro
 		return ReplProgress{}, err
 	}
 	defer done()
-	return c.rt.callReplProgress(ctx, c.rt.fnReplResume, 1, c.snapshotID, arg.ptr, arg.len)
+	return c.rt.callReplProgress(ctx, c.rt.fnReplResume, c.snapshotID, 1, arg.ptr, arg.len)
 }
 
 // Throw resumes the OS call with an error.
@@ -276,7 +276,7 @@ func (c *ReplOsCall) Throw(ctx context.Context, message string) (ReplProgress, e
 		return ReplProgress{}, err
 	}
 	defer done()
-	return c.rt.callReplProgress(ctx, c.rt.fnReplResume, 1, c.snapshotID, arg.ptr, arg.len)
+	return c.rt.callReplProgress(ctx, c.rt.fnReplResume, c.snapshotID, 1, arg.ptr, arg.len)
 }
 
 // Defer resumes the OS call as a future.
@@ -296,7 +296,7 @@ func (c *ReplOsCall) Defer(ctx context.Context) (ReplProgress, error) {
 		return ReplProgress{}, err
 	}
 	defer done()
-	return c.rt.callReplProgress(ctx, c.rt.fnReplResume, 1, c.snapshotID, arg.ptr, arg.len)
+	return c.rt.callReplProgress(ctx, c.rt.fnReplResume, c.snapshotID, 1, arg.ptr, arg.len)
 }
 
 // ReplNameLookup represents a suspended name lookup.
@@ -345,7 +345,7 @@ func (n *ReplNameLookup) Return(ctx context.Context, value any) (ReplProgress, e
 		return ReplProgress{}, err
 	}
 	defer done()
-	return n.rt.callReplProgress(ctx, n.rt.fnReplResume, 2, n.snapshotID, arg.ptr, arg.len)
+	return n.rt.callReplProgress(ctx, n.rt.fnReplResume, n.snapshotID, 2, arg.ptr, arg.len)
 }
 
 // Undefined resumes the name lookup as undefined.
@@ -364,7 +364,7 @@ func (n *ReplNameLookup) Undefined(ctx context.Context) (ReplProgress, error) {
 		return ReplProgress{}, err
 	}
 	defer done()
-	return n.rt.callReplProgress(ctx, n.rt.fnReplResume, 2, n.snapshotID, arg.ptr, arg.len)
+	return n.rt.callReplProgress(ctx, n.rt.fnReplResume, n.snapshotID, 2, arg.ptr, arg.len)
 }
 
 // ReplResolveFutures represents suspended async futures.
@@ -398,7 +398,7 @@ func (f *ReplResolveFutures) Resume(ctx context.Context, results []FutureResult)
 		return ReplProgress{}, err
 	}
 	defer done()
-	return f.rt.callReplProgress(ctx, f.rt.fnReplResume, 3, f.snapshotID, arg.ptr, arg.len)
+	return f.rt.callReplProgress(ctx, f.rt.fnReplResume, f.snapshotID, 3, arg.ptr, arg.len)
 }
 
 // Dump serializes the futures snapshot.
