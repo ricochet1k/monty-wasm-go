@@ -9,10 +9,10 @@ use json::{
     decode_inputs, decode_object, decode_value, encode_kwargs, encode_object, encode_objects,
 };
 use monty::{
-    bytecode::CallLocation,
     ExcType, ExtFunctionResult, FunctionCall, MontyException, MontyObject, MontyRepl, MontyRun,
     NameLookup, NameLookupResult, NoLimitTracker, OsCall, PrintWriter, ReplContinuationMode,
-    ReplProgress, ResolveFutures, RunProgress, detect_repl_continuation_mode,
+    ReplProgress, ResolveFutures, RunProgress, bytecode::CallLocation,
+    detect_repl_continuation_mode,
 };
 use postcard::{from_bytes, to_allocvec};
 use serde::Deserialize;
@@ -147,7 +147,7 @@ fn encode_progress(state: &mut State, progress: RunProgress<NoLimitTracker>) -> 
             "kind": "complete",
             "result": serde_json::from_str::<Value>(&encode_object(&value)?)?,
         }),
-       RunProgress::FunctionCall(fc) => {
+        RunProgress::FunctionCall(fc) => {
             let fn_name = fc.function_name.clone();
             let args_json = encode_objects(&fc.args)?;
             let kwargs_json = encode_kwargs(&fc.kwargs)?;
@@ -169,7 +169,7 @@ fn encode_progress(state: &mut State, progress: RunProgress<NoLimitTracker>) -> 
                 "location": location,
             })
         }
-      RunProgress::OsCall(os_call) => {
+        RunProgress::OsCall(os_call) => {
             let fn_name = os_call.function.to_string();
             let args_json = encode_objects(&os_call.args)?;
             let kwargs_json = encode_kwargs(&os_call.kwargs)?;
@@ -229,7 +229,7 @@ fn encode_repl_progress(
                 "result": serde_json::from_str::<Value>(&result_json)?,
             })
         }
-      ReplProgress::FunctionCall(fc) => {
+        ReplProgress::FunctionCall(fc) => {
             let fn_name = fc.function_name.clone();
             let args_json = encode_objects(&fc.args)?;
             let kwargs_json = encode_kwargs(&fc.kwargs)?;
@@ -251,7 +251,7 @@ fn encode_repl_progress(
                 "location": location,
             })
         }
-     ReplProgress::OsCall(os_call) => {
+        ReplProgress::OsCall(os_call) => {
             let fn_name = os_call.function.to_string();
             let args_json = encode_objects(&os_call.args)?;
             let kwargs_json = encode_kwargs(&os_call.kwargs)?;
@@ -1023,4 +1023,51 @@ pub unsafe extern "C" fn monty_repl_snapshot_load(ptr: u32, len: u32) -> u64 {
 pub extern "C" fn monty_repl_snapshot_free(snapshot_id: u64) {
     let mut state = state().lock().unwrap();
     state.repl_progress.remove(&snapshot_id);
+}
+
+/// Store bytes as a blob and return the blob ID
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn monty_blob_store(ptr: u32, len: u32) -> u64 {
+    with_state(|state| {
+        let bytes = read_bytes(ptr, len)?;
+        Ok(store_blob(state, bytes.to_vec()))
+    })
+}
+
+/// Load REPL progress snapshot and return its kind and snapshot ID as JSON
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn monty_repl_snapshot_load_info(ptr: u32, len: u32) -> u64 {
+    with_state(|state| {
+        let bytes = read_bytes(ptr, len)?;
+        let snapshot: ReplProgress<NoLimitTracker> = from_bytes(bytes)?;
+        let (kind, extra) = match &snapshot {
+            ReplProgress::Complete { .. } => ("complete", serde_json::Value::Null),
+            ReplProgress::FunctionCall(_) => ("function_call", serde_json::Value::Null),
+            ReplProgress::OsCall(_) => ("os_call", serde_json::Value::Null),
+            ReplProgress::NameLookup(_) => ("name_lookup", serde_json::Value::Null),
+            ReplProgress::ResolveFutures(sf) => {
+                let ids: Vec<u32> = sf.pending_call_ids().to_vec();
+                (
+                    "resolve_futures",
+                    serde_json::json!({"pending_call_ids": ids}),
+                )
+            }
+        };
+        // Allocate a new snapshot ID and store the snapshot
+        let snapshot_id = state.alloc_id();
+        state.repl_progress.insert(snapshot_id, snapshot);
+        let info = match extra {
+            serde_json::Value::Null => json!({
+                "kind": kind,
+                "snapshot_id": snapshot_id,
+            }),
+            other => json!({
+                "kind": kind,
+                "snapshot_id": snapshot_id,
+                "extra": other,
+            }),
+        };
+        let json_bytes = serde_json::to_vec(&info)?;
+        Ok(store_blob(state, json_bytes))
+    })
 }

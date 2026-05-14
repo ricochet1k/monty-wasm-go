@@ -520,8 +520,9 @@ func (r *Runtime) LoadSnapshot(ctx context.Context, data []byte) (ReplProgress, 
 
 	// Parse the JSON to get kind and snapshot_id
 	var info struct {
-		Kind       string `json:"kind"`
-		SnapshotID uint64 `json:"snapshot_id"`
+		Kind       string          `json:"kind"`
+		SnapshotID uint64          `json:"snapshot_id"`
+		Extra      json.RawMessage `json:"extra,omitempty"`
 	}
 	if err := json.Unmarshal(infoBlob, &info); err != nil {
 		return ReplProgress{}, err
@@ -551,7 +552,21 @@ func (r *Runtime) LoadSnapshot(ctx context.Context, data []byte) (ReplProgress, 
 	case ReplProgressNameLookup:
 		progress.NameLookup = &ReplNameLookup{snapshotID: snapshotID, rt: r}
 	case ReplProgressResolveFutures:
-		progress.Futures = &ReplResolveFutures{snapshotID: snapshotID, rt: r}
+		// Parse pending_call_ids from extra field
+		var pendingCallIDs []uint32
+		if len(info.Extra) > 0 {
+			var extra struct {
+				PendingCallIDs []uint32 `json:"pending_call_ids"`
+			}
+			if err := json.Unmarshal(info.Extra, &extra); err == nil {
+				pendingCallIDs = extra.PendingCallIDs
+			}
+		}
+		progress.Futures = &ReplResolveFutures{
+			PendingCallIDs: pendingCallIDs,
+			snapshotID:     snapshotID,
+			rt:             r,
+		}
 	}
 
 	return progress, nil
