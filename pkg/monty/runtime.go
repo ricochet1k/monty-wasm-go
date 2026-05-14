@@ -44,6 +44,7 @@ type Runtime struct {
 	fnBlobPtr            api.Function
 	fnBlobLen            api.Function
 	fnBlobFree           api.Function
+	fnBlobStore          api.Function
 
 	// REPL functions
 	fnReplCheckContinuation api.Function
@@ -58,6 +59,7 @@ type Runtime struct {
 	fnReplSnapshotDump      api.Function
 	fnReplSnapshotLoad      api.Function
 	fnReplSnapshotFree      api.Function
+	fnReplSnapshotLoadInfo  api.Function
 }
 
 func NewRuntime(ctx context.Context) (*Runtime, error) {
@@ -437,6 +439,7 @@ func (r *Runtime) cacheFunctions() error {
 		"monty_blob_ptr":               &r.fnBlobPtr,
 		"monty_blob_len":               &r.fnBlobLen,
 		"monty_blob_free":              &r.fnBlobFree,
+		"monty_blob_store":             &r.fnBlobStore,
 		// REPL functions
 		"monty_repl_check_continuation": &r.fnReplCheckContinuation,
 		"monty_repl_new":                &r.fnReplNew,
@@ -450,6 +453,7 @@ func (r *Runtime) cacheFunctions() error {
 		"monty_repl_snapshot_dump":      &r.fnReplSnapshotDump,
 		"monty_repl_snapshot_load":      &r.fnReplSnapshotLoad,
 		"monty_repl_snapshot_free":      &r.fnReplSnapshotFree,
+		"monty_repl_snapshot_load_info": &r.fnReplSnapshotLoadInfo,
 	}
 	for name, dest := range required {
 		fn := r.mod.ExportedFunction(name)
@@ -459,4 +463,128 @@ func (r *Runtime) cacheFunctions() error {
 		*dest = fn
 	}
 	return nil
+}
+
+// loadSnapshot deserializes bytes into a REPL snapshot and returns the snapshot ID.
+func (r *Runtime) loadSnapshot(ctx context.Context, data []byte) (uint64, error) {
+	arg, done, err := r.arg(ctx, data)
+	if err != nil {
+		return 0, err
+	}
+	defer done()
+	id, err := r.callUint64(r.fnReplSnapshotLoad, arg.ptr, arg.len)
+	if err != nil {
+		return 0, err
+	}
+	if id == 0 {
+		msg, _ := r.lastError(ctx)
+		return 0, fmt.Errorf("monty: load snapshot: %s", msg)
+	}
+	return id, nil
+}
+
+// LoadSnapshot deserializes bytes to get the kind and snapshot ID,
+// then loads the snapshot and returns a ReplProgress with the loaded snapshot ID.
+
+// LoadSnapshot deserializes bytes to get the kind and snapshot ID,
+// then loads the snapshot and returns a ReplProgress with the loaded snapshot ID.
+func (r *Runtime) LoadSnapshot(ctx context.Context, data []byte) (ReplProgress, error) {
+	// Store the data as a blob
+	dataBlobID, err := r.storeBlob(ctx, data)
+	if err != nil {
+		return ReplProgress{}, err
+	}
+	defer r.fnBlobFree.Call(context.Background(), dataBlobID)
+
+	// Get the blob pointer and length
+	ptrRes, err := r.fnBlobPtr.Call(context.Background(), dataBlobID)
+	if err != nil {
+		return ReplProgress{}, err
+	}
+	lenRes, err := r.fnBlobLen.Call(context.Background(), dataBlobID)
+	if err != nil {
+		return ReplProgress{}, err
+	}
+
+	// Call load info with pointer and length to get the JSON info blob
+	infoBlobID, err := r.callID(ctx, r.fnReplSnapshotLoadInfo, uint64(ptrRes[0]), uint64(lenRes[0]))
+	if err != nil {
+		return ReplProgress{}, err
+	}
+
+	// Read the JSON info from the blob
+	infoBlob, err := r.readBlob(ctx, infoBlobID)
+	if err != nil {
+		return ReplProgress{}, err
+	}
+
+	// Parse the JSON to get kind and snapshot_id
+	var info struct {
+		Kind       string `json:"kind"`
+		SnapshotID uint64 `json:"snapshot_id"`
+	}
+	if err := json.Unmarshal(infoBlob, &info); err != nil {
+		return ReplProgress{}, err
+	}
+
+	// Load the actual snapshot
+	snapshotID, err := r.loadSnapshot(ctx, data)
+	if err != nil {
+		return ReplProgress{}, err
+	}
+
+	// Build the ReplProgress based on kind
+	progress := ReplProgress{
+		Kind:       r.kindFromString(info.Kind),
+		Result:     nil,
+		Call:       nil,
+		OS:         nil,
+		NameLookup: nil,
+		Futures:    nil,
+	}
+
+	switch progress.Kind {
+	case ReplProgressFunctionCall:
+		progress.Call = &ReplFunctionCall{snapshotID: snapshotID, rt: r}
+	case ReplProgressOsCall:
+		progress.OS = &ReplOsCall{snapshotID: snapshotID, rt: r}
+	case ReplProgressNameLookup:
+		progress.NameLookup = &ReplNameLookup{snapshotID: snapshotID, rt: r}
+	case ReplProgressResolveFutures:
+		progress.Futures = &ReplResolveFutures{snapshotID: snapshotID, rt: r}
+	}
+
+	return progress, nil
+}
+
+// kindFromString converts a string kind to ReplProgressKind
+func (r *Runtime) kindFromString(kind string) ReplProgressKind {
+	switch kind {
+	case "complete":
+		return ReplProgressComplete
+	case "function_call":
+		return ReplProgressFunctionCall
+	case "os_call":
+		return ReplProgressOsCall
+	case "name_lookup":
+		return ReplProgressNameLookup
+	case "resolve_futures":
+		return ReplProgressResolveFutures
+	default:
+		return ReplProgressComplete
+	}
+}
+
+// storeBlob stores bytes as a blob and returns the blob ID.
+func (r *Runtime) storeBlob(ctx context.Context, data []byte) (uint64, error) {
+	arg, done, err := r.arg(ctx, data)
+	if err != nil {
+		return 0, err
+	}
+	defer done()
+	id, err := r.callUint64(r.fnBlobStore, arg.ptr, arg.len)
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
 }

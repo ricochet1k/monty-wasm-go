@@ -210,6 +210,30 @@ func (c *ReplFunctionCall) Throw(ctx context.Context, message string) (ReplProgr
 	return c.rt.callReplProgress(ctx, c.rt.fnReplResume, c.snapshotID, 0, arg.ptr, arg.len)
 }
 
+// ResumePending resumes execution by pushing an ExternalFuture for async resolution.
+//
+// This is used when a function call occurs inside an async context (e.g., inside
+// asyncio.gather()) and the result should be tracked as a pending future rather
+// than returned immediately. The call_id is available in the ReplResolveFutures
+// progress that follows.
+func (c *ReplFunctionCall) ResumePending(ctx context.Context) (ReplProgress, error) {
+	if c == nil || c.snapshotID == 0 || c.rt == nil {
+		return ReplProgress{}, errors.New("monty: function call not resumable")
+	}
+	data, err := json.Marshal(map[string]any{
+		"type": "future",
+	})
+	if err != nil {
+		return ReplProgress{}, fmt.Errorf("monty: encode function call future: %w", err)
+	}
+	arg, done, err := c.rt.arg(ctx, data)
+	if err != nil {
+		return ReplProgress{}, err
+	}
+	defer done()
+	return c.rt.callReplProgress(ctx, c.rt.fnReplResume, c.snapshotID, 0, arg.ptr, arg.len)
+}
+
 // ReplOsCall represents a suspended OS call.
 type ReplOsCall struct {
 	OSFunction string

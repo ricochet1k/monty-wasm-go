@@ -738,3 +738,116 @@ func TestReplFunctionCallClose(t *testing.T) {
 		t.Fatal("expected error on dump after close")
 	}
 }
+
+// TestReplResolveFuturesDumpLoadResume tests dumping, loading, and resuming a ResolveFutures progress.
+// This test uses async code that creates pending futures which need to be resolved.
+func TestReplResolveFuturesDumpLoadResume(t *testing.T) {
+	ctx := context.Background()
+	rt := newRuntime(t, ctx)
+
+	// Create REPL
+	repl, err := NewRepl(ctx, rt, "test.py")
+	if err != nil {
+		t.Fatalf("new repl: %v", err)
+	}
+	t.Cleanup(repl.Close)
+
+	// Start code that will suspend on futures (async code with external calls)
+	// This code uses asyncio.gather() with an external async function `foo`
+	progress, err := repl.Start(ctx, `
+import asyncio
+
+async def main():
+    result = await asyncio.gather(foo())
+    return result
+
+await main()
+`)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	// Drive execution through NameLookup and FunctionCall yields until we get ResolveFutures
+	for {
+		switch progress.Kind {
+		case ReplProgressNameLookup:
+			// Provide function implementations for all names
+			name := progress.NameLookup.Name
+			result, err := progress.NameLookup.Return(ctx, map[string]any{
+				"type": "function",
+				"name": name,
+			})
+			if err != nil {
+				t.Fatalf("name lookup resume for %q: %v", name, err)
+			}
+			progress = result
+		case ReplProgressFunctionCall:
+			// Resume with a future to track this call for later resolution
+			result, err := progress.Call.ResumePending(ctx)
+			if err != nil {
+				t.Fatalf("function call resume pending: %v", err)
+			}
+			progress = result
+		case ReplProgressResolveFutures:
+			// We've reached the ResolveFutures stage
+			if progress.Futures == nil {
+				t.Fatal("expected futures payload")
+			}
+			goto got_resolve_futures
+		case ReplProgressComplete:
+			t.Fatal("unexpected complete before ResolveFutures")
+		default:
+			t.Fatalf("unexpected progress kind: %v", progress.Kind)
+		}
+	}
+
+got_resolve_futures:
+	if progress.Kind != ReplProgressResolveFutures {
+		t.Fatalf("expected resolve futures progress, got %v", progress.Kind)
+	}
+
+	// Dump the futures snapshot
+	snapshot, err := progress.Futures.Dump(ctx)
+	if err != nil {
+		t.Fatalf("dump snapshot: %v", err)
+	}
+	if len(snapshot) == 0 {
+		t.Fatal("expected non-empty snapshot")
+	}
+
+	// Close the original snapshot
+	progress.Futures.Close(ctx)
+
+	// Load the snapshot from bytes using the same REPL's runtime
+	loadedProgress, err := repl.rt.LoadSnapshot(ctx, snapshot)
+	if err != nil {
+		t.Fatalf("load snapshot: %v", err)
+	}
+	if loadedProgress.Kind != ReplProgressResolveFutures {
+		t.Fatalf("expected resolve futures after load, got %v", loadedProgress.Kind)
+	}
+	if loadedProgress.Futures == nil {
+		t.Fatal("expected futures payload after load")
+	}
+
+	// Resume using the Futures.Resume method - resolve all futures successfully
+	// The external function `foo` returns 42
+	next, err := loadedProgress.Futures.Resume(ctx, []FutureResult{
+		{CallID: loadedProgress.Futures.PendingCallIDs[0], Result: 42},
+	})
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if next.Kind != ReplProgressComplete {
+		t.Fatalf("expected complete after resume, got %v", next.Kind)
+	}
+
+	// Verify the result
+	var got []int
+	if err := next.Result.Decode(&got); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if len(got) != 1 || got[0] != 42 {
+		t.Fatalf("expected [42], got %v", got)
+	}
+}

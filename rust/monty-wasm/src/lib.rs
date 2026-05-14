@@ -740,43 +740,58 @@ pub unsafe extern "C" fn monty_repl_resume(
             match progress {
                 ReplProgress::FunctionCall(fc) => {
                     let result: Value = serde_json::from_str(&result_json)?;
-                    let ext_result = match result.get("type") {
-                        Some(type_val) if type_val == "return" => {
-                            if let Some(value) = result.get("value") {
-                                ExtFunctionResult::Return(decode_value(value.clone())?)
-                            } else {
-                                return Err(BridgeError::Message(
-                                    "function call result missing 'value'".into(),
-                                ));
+                    // Handle "future" type separately - it doesn't produce an ExtFunctionResult
+                    if result.get("type").and_then(|v| v.as_str()) == Some("future") {
+                        match fc.resume_pending(PrintWriter::Stdout) {
+                            Ok(new_progress) => new_progress,
+                            Err(start_err) => {
+                                let err_str = start_err.error.summary();
+                                let repl = start_err.repl;
+                                let repl_id = state.alloc_id();
+                                state.repls.insert(repl_id, repl);
+                                state.set_error(err_str);
+                                return Ok(0);
                             }
                         }
-                        Some(type_val) if type_val == "error" => {
-                            if let Some(msg) = result.get("message").and_then(|v| v.as_str()) {
-                                ExtFunctionResult::Error(MontyException::new(
-                                    ExcType::RuntimeError,
-                                    Some(msg.to_string()),
-                                ))
-                            } else {
+                    } else {
+                        let ext_result = match result.get("type") {
+                            Some(type_val) if type_val == "return" => {
+                                if let Some(value) = result.get("value") {
+                                    ExtFunctionResult::Return(decode_value(value.clone())?)
+                                } else {
+                                    return Err(BridgeError::Message(
+                                        "function call result missing 'value'".into(),
+                                    ));
+                                }
+                            }
+                            Some(type_val) if type_val == "error" => {
+                                if let Some(msg) = result.get("message").and_then(|v| v.as_str()) {
+                                    ExtFunctionResult::Error(MontyException::new(
+                                        ExcType::RuntimeError,
+                                        Some(msg.to_string()),
+                                    ))
+                                } else {
+                                    return Err(BridgeError::Message(
+                                        "function call error result missing 'message'".into(),
+                                    ));
+                                }
+                            }
+                            _ => {
                                 return Err(BridgeError::Message(
-                                    "function call error result missing 'message'".into(),
+                                    "function call result missing 'type' field".into(),
                                 ));
                             }
-                        }
-                        _ => {
-                            return Err(BridgeError::Message(
-                                "function call result missing 'type' field".into(),
-                            ));
-                        }
-                    };
-                    match fc.resume(ext_result, PrintWriter::Stdout) {
-                        Ok(p) => p,
-                        Err(start_err) => {
-                            let err_str = start_err.error.summary();
-                            let repl = start_err.repl;
-                            let repl_id = state.alloc_id();
-                            state.repls.insert(repl_id, repl);
-                            state.set_error(err_str);
-                            return Ok(0);
+                        };
+                        match fc.resume(ext_result, PrintWriter::Stdout) {
+                            Ok(p) => p,
+                            Err(start_err) => {
+                                let err_str = start_err.error.summary();
+                                let repl = start_err.repl;
+                                let repl_id = state.alloc_id();
+                                state.repls.insert(repl_id, repl);
+                                state.set_error(err_str);
+                                return Ok(0);
+                            }
                         }
                     }
                 }
@@ -840,6 +855,19 @@ pub unsafe extern "C" fn monty_repl_resume(
                             } else {
                                 return Err(BridgeError::Message(
                                     "name lookup result missing 'value'".into(),
+                                ));
+                            }
+                        }
+                        Some(type_val) if type_val == "function" => {
+                            // Create an external function with the given name
+                            if let Some(name) = result.get("name").and_then(|v| v.as_str()) {
+                                NameLookupResult::Value(MontyObject::Function {
+                                    name: name.to_string(),
+                                    docstring: None,
+                                })
+                            } else {
+                                return Err(BridgeError::Message(
+                                    "name lookup function result missing 'name'".into(),
                                 ));
                             }
                         }
