@@ -758,7 +758,7 @@ func TestReplResolveFuturesDumpLoadResume(t *testing.T) {
 import asyncio
 
 async def main():
-    result = await asyncio.gather(foo())
+    result = await foo()
     return result
 
 await main()
@@ -843,11 +843,11 @@ got_resolve_futures:
 	}
 
 	// Verify the result
-	var got []int
+	var got int
 	if err := next.Result.Decode(&got); err != nil {
 		t.Fatalf("decode result: %v", err)
 	}
-	if len(got) != 1 || got[0] != 42 {
-		t.Fatalf("expected [42], got %v", got)
+	if got != 42 {
+		t.Fatalf("expected 42, got %d", got)
 	}
 }

@@ -394,13 +394,32 @@ func (n *ReplNameLookup) Undefined(ctx context.Context) (ReplProgress, error) {
 }
 
 // ReplResolveFutures represents suspended async futures.
+//
+// This progress type is returned when the VM encounters external function calls
+// inside an async context (e.g., inside asyncio.gather()). The PendingCallIDs
+// contain the call IDs that need to be resolved before execution can continue.
+//
+// To resolve the futures:
+//  1. Call Dump() to serialize the snapshot for later loading
+//  2. Provide results for each call_id via Resume()
+//  3. The VM will continue execution with the resolved values
+//
+// See ReplFunctionCall.ResumePending() for how to track function calls as pending futures.
 type ReplResolveFutures struct {
 	PendingCallIDs []uint32
 	snapshotID     uint64
 	rt             *Runtime
 }
 
-// Resume resolves the futures.
+// Resume resolves the futures by providing results for each pending call.
+//
+// The results slice must contain one entry for each call_id in PendingCallIDs.
+// Each entry can either have a Result (for successful completion) or an Err
+// (for failures). The order of entries doesn't matter - they are matched by
+// call_id.
+//
+// After all futures are resolved, execution continues and returns the next
+// progress state (typically Complete).
 func (f *ReplResolveFutures) Resume(ctx context.Context, results []FutureResult) (ReplProgress, error) {
 	if f == nil || f.snapshotID == 0 || f.rt == nil {
 		return ReplProgress{}, errors.New("monty: futures not resumable")

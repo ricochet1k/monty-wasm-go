@@ -13,8 +13,11 @@ Unlike `monty-go` (cgo + static Rust archive), this package:
 - [x] Compile Monty programs from Python code.
 - [x] Start execution with JSON-serializable inputs.
 - [x] Handle external/OS pauses via `Call.Return`, `Call.Throw`, `Call.Defer`.
-- [x] Resume pending futures.
+- [x] Resume pending futures via `ReplResolveFutures.Resume()`.
 - [x] Dump/load program state bytes.
+- [x] Async execution with external async functions.
+- [x] REPL state persistence across snippets.
+
 
 ## Common workflows
 
@@ -28,6 +31,70 @@ make test
 # format rust + go code
 make fmt
 ```
+
+## Async Execution
+
+The REPL supports async/await with external async functions. When Monty code calls an
+external function inside an async context (e.g., `await foo()` or `asyncio.gather(foo())`), the VM
+suspends and yields `ReplProgressResolveFutures` with pending call IDs.
+
+### Flow
+
+```
+1. repl.Start() executes code
+2. For undefined names, VM yields ReplProgressNameLookup
+   → Host calls NameLookup.Return() with {"type": "function", "name": "<name>"}
+3. External call inside async context yields ReplProgressFunctionCall
+   → Host calls Call.ResumePending() to track as pending future
+4. VM yields ReplProgressResolveFutures with pending call IDs
+   → Host can Dump() the snapshot, load it later, then Resume() with results
+```
+
+### Example
+
+```go
+// Start async code that will suspend on external calls
+progress, err := repl.Start(ctx, `
+import asyncio
+
+async def main():
+    result = await foo()
+    return result
+
+await main()
+`)
+
+// Drive through NameLookup yields
+for {
+    switch progress.Kind {
+    case ReplProgressNameLookup:
+        // Provide function implementations
+        result, _ = progress.NameLookup.Return(ctx, map[string]any{
+            "type": "function", "name": progress.NameLookup.Name,
+        })
+        progress = result
+    case ReplProgressFunctionCall:
+        // Track as pending future (not immediate return)
+        result, _ = progress.Call.ResumePending(ctx)
+        progress = result
+    case ReplProgressResolveFutures:
+        // Got pending futures to resolve
+        snapshot, _ := progress.Futures.Dump(ctx)
+        // ... later, load and resume ...
+        loaded, _ := repl.rt.LoadSnapshot(ctx, snapshot)
+        next, _ := loaded.Futures.Resume(ctx, []monty.FutureResult{
+            {CallID: loaded.Futures.PendingCallIDs[0], Result: 42},
+        })
+        progress = next
+    case ReplProgressComplete:
+        // Done!
+        var result int
+        progress.Result.Decode(&result)
+        // result = 42
+    }
+}
+```
+
 
 ## Build the Wasm module manually
 

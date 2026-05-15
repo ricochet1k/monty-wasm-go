@@ -388,7 +388,7 @@ func NewRepl(ctx context.Context, rt *Runtime, scriptName string) (*Repl, error)
 // Start executes code with suspension support.
 func (r *Repl) Start(ctx context.Context, code string, inputs ...any) (ReplProgress, error) {
 	if r == nil || r.rt == nil || r.id == 0 {
-		return ReplProgress{}, errors.New("monty: closed repl")
+		return ReplProgress{}, errors.New("monty: repl already consumed by Start — call Start only once per REPL; to continue, use the returned ReplProgress or create a new REPL")
 	}
 	// Encode code string
 	codeArg, doneCode, err := r.rt.arg(ctx, []byte(code))
@@ -449,7 +449,7 @@ func (r *Repl) Start(ctx context.Context, code string, inputs ...any) (ReplProgr
 // Resume resumes from a progress snapshot.
 func (r *Repl) Resume(ctx context.Context, progress ReplProgress, result any) (ReplProgress, error) {
 	if r == nil || r.rt == nil {
-		return ReplProgress{}, errors.New("monty: closed repl")
+		return ReplProgress{}, errors.New("monty: repl already consumed by Start — Resume requires a valid REPL; create a new REPL instead")
 	}
 	if progress.Kind == ReplProgressComplete {
 		return progress, nil
