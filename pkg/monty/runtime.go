@@ -293,38 +293,6 @@ func (r *Runtime) decodeReplProgress(payload []byte) (ReplProgress, error) {
 	return progress, nil
 }
 
-// callReplProgress calls a REPL function and decodes the result as ReplProgress.
-func (r *Runtime) callReplProgress(ctx context.Context, fn api.Function, progressID uint64, progressType uint32, params ...uint64) (ReplProgress, error) {
-	id, err := r.callID(ctx, fn, append([]uint64{progressID, uint64(progressType)}, params...)...)
-	if err != nil {
-		return ReplProgress{}, err
-	}
-	buf, err := r.readBlob(ctx, id)
-	if err != nil {
-		return ReplProgress{}, err
-	}
-	return r.decodeReplProgress(buf)
-}
-
-func rawToValues(items []json.RawMessage) []Value {
-	out := make([]Value, len(items))
-	for i, item := range items {
-		out[i] = append(Value{}, item...)
-	}
-	return out
-}
-
-func rawToKwargs(items [][]json.RawMessage) []KeywordArg {
-	out := make([]KeywordArg, 0, len(items))
-	for _, pair := range items {
-		if len(pair) != 2 {
-			continue
-		}
-		out = append(out, KeywordArg{Key: append(Value{}, pair[0]...), Value: append(Value{}, pair[1]...)})
-	}
-	return out
-}
-
 func (r *Runtime) readBlob(ctx context.Context, blobID uint64) ([]byte, error) {
 	defer r.fnBlobFree.Call(ctx, blobID)
 	ptrRes, err := r.fnBlobPtr.Call(ctx, blobID)
@@ -485,9 +453,6 @@ func (r *Runtime) loadSnapshot(ctx context.Context, data []byte) (uint64, error)
 
 // LoadSnapshot deserializes bytes to get the kind and snapshot ID,
 // then loads the snapshot and returns a ReplProgress with the loaded snapshot ID.
-
-// LoadSnapshot deserializes bytes to get the kind and snapshot ID,
-// then loads the snapshot and returns a ReplProgress with the loaded snapshot ID.
 func (r *Runtime) LoadSnapshot(ctx context.Context, data []byte) (ReplProgress, error) {
 	// Store the data as a blob
 	dataBlobID, err := r.storeBlob(ctx, data)
@@ -602,4 +567,13 @@ func (r *Runtime) storeBlob(ctx context.Context, data []byte) (uint64, error) {
 		return 0, err
 	}
 	return id, nil
+}
+
+// callUint64 calls a function and returns the result as uint64.
+func (r *Runtime) callUint64(fn api.Function, params ...uint64) (uint64, error) {
+	res, err := fn.Call(context.Background(), params...)
+	if err != nil {
+		return 0, err
+	}
+	return res[0], nil
 }
