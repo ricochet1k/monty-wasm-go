@@ -52,6 +52,7 @@ type Runtime struct {
 	fnReplStart             api.Function
 	fnReplResume            api.Function
 	fnReplFeed              api.Function
+	fnReplFeedProgress      api.Function
 	fnReplDump              api.Function
 	fnReplLoad              api.Function
 	fnReplFree              api.Function
@@ -173,6 +174,7 @@ func (r *Runtime) decodeProgress(payload []byte) (Progress, error) {
 		FutureSnapshotID uint64              `json:"future_snapshot_id"`
 		Name             string              `json:"name"`
 		Location         *CallLocation       `json:"location"`
+		ReplID           uint64              `json:"repl_id"`
 	}
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		return Progress{}, fmt.Errorf("monty: decode progress: %w", err)
@@ -240,6 +242,7 @@ func (r *Runtime) decodeReplProgress(payload []byte) (ReplProgress, error) {
 		FutureSnapshotID uint64              `json:"future_snapshot_id"`
 		Name             string              `json:"name"`
 		Location         *CallLocation       `json:"location"`
+		ReplID           uint64              `json:"repl_id"`
 	}
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		return ReplProgress{}, fmt.Errorf("monty: decode repl progress: %w", err)
@@ -250,6 +253,12 @@ func (r *Runtime) decodeReplProgress(payload []byte) (ReplProgress, error) {
 	case "complete":
 		progress.Kind = ReplProgressComplete
 		progress.Result = append(Value{}, raw.Result...)
+		if raw.ReplID != 0 {
+			progress.Complete = &ReplSnippetComplete{
+				Repl:   &Repl{rt: r, id: raw.ReplID},
+				Result: progress.Result,
+			}
+		}
 	case "function_call":
 		progress.Kind = ReplProgressFunctionCall
 		progress.Call = &ReplFunctionCall{
@@ -414,6 +423,7 @@ func (r *Runtime) cacheFunctions() error {
 		"monty_repl_start":              &r.fnReplStart,
 		"monty_repl_resume":             &r.fnReplResume,
 		"monty_repl_feed":               &r.fnReplFeed,
+		"monty_repl_feed_progress":      &r.fnReplFeedProgress,
 		"monty_repl_dump":               &r.fnReplDump,
 		"monty_repl_load":               &r.fnReplLoad,
 		"monty_repl_free":               &r.fnReplFree,

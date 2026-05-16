@@ -32,15 +32,18 @@ func TestReplFeed(t *testing.T) {
 	}
 	t.Cleanup(func() { repl.Close(ctx) })
 
-	out, err := repl.Feed(ctx, "1 + 1")
+	progress, err := repl.Feed(ctx, "1 + 1")
 	if err != nil {
 		t.Fatalf("feed: %v", err)
 	}
-	if out == nil {
+	if progress.Kind != ReplProgressComplete {
+		t.Fatalf("expected complete, got %v", progress.Kind)
+	}
+	if progress.Result == nil {
 		t.Fatal("expected result, got nil")
 	}
 	var got int
-	if err := out.Decode(&got); err != nil {
+	if err := progress.Result.Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if got != 2 {
@@ -59,30 +62,36 @@ func TestReplFeedMultiple(t *testing.T) {
 	t.Cleanup(func() { repl.Close(ctx) })
 
 	// Multiple expressions should work
-	out, err := repl.Feed(ctx, "21 + 21")
+	progress, err := repl.Feed(ctx, "21 + 21")
 	if err != nil {
 		t.Fatalf("feed: %v", err)
 	}
-	if out == nil {
+	if progress.Kind != ReplProgressComplete {
+		t.Fatalf("expected complete, got %v", progress.Kind)
+	}
+	if progress.Result == nil {
 		t.Fatal("expected result, got nil")
 	}
 	var got int
-	if err := out.Decode(&got); err != nil {
+	if err := progress.Result.Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if got != 42 {
 		t.Fatalf("expected 42, got %d", got)
 	}
 
-	// Another expression
-	out, err = repl.Feed(ctx, "100 - 58")
+	// Another expression - use the repl from the previous Complete progress
+	progress, err = progress.Complete.Repl.Feed(ctx, "100 - 58")
 	if err != nil {
 		t.Fatalf("feed: %v", err)
 	}
-	if out == nil {
+	if progress.Kind != ReplProgressComplete {
+		t.Fatalf("expected complete, got %v", progress.Kind)
+	}
+	if progress.Result == nil {
 		t.Fatal("expected result, got nil")
 	}
-	if err := out.Decode(&got); err != nil {
+	if err := progress.Result.Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if got != 42 {
@@ -461,11 +470,11 @@ func TestReplResumeCompleteProgress(t *testing.T) {
 		t.Fatalf("expected complete, got %v", progress.Kind)
 	}
 
-	// TODO: The repl isn't yet being sent from rust/monty-wasm or handled correctly in Go, but this is how it should work.
-	repl := progress.Complete.Repl
+	// Resume using the repl from the Complete progress
+	resumedRepl := progress.Complete.Repl
 
 	// Resume on complete progress should return the same progress
-	next, err := repl.Feed(ctx, "2+2")
+	next, err := resumedRepl.Feed(ctx, "2+2")
 	if err != nil {
 		t.Fatalf("resume complete: %v", err)
 	}
@@ -485,7 +494,7 @@ func TestReplFeedSyntaxError(t *testing.T) {
 	t.Cleanup(func() { repl.Close(ctx) })
 
 	// Syntax error should return an error
-	_, err = repl.Feed(ctx, "defunc")
+	_, err = repl.Feed(ctx, "defunc x")
 	if err == nil {
 		t.Fatal("expected error on syntax error, got nil")
 	}
@@ -501,14 +510,14 @@ func TestReplFeedException(t *testing.T) {
 	}
 	t.Cleanup(func() { repl.Close(ctx) })
 
-	// Exception should be returned in the Value (may be None or error string)
-	out, err := repl.Feed(ctx, "1/0")
+	// Exception should be returned in the Result
+	progress, err := repl.Feed(ctx, "1/0")
 	if err != nil {
 		// Some implementations return error, some return None
 		t.Logf("feed exception returned error: %v", err)
 		return
 	}
-	t.Logf("feed exception returned: %v", out)
+	t.Logf("feed exception returned: %v", progress.Result)
 }
 
 func TestReplMultipleDumps(t *testing.T) {
@@ -522,29 +531,29 @@ func TestReplMultipleDumps(t *testing.T) {
 	t.Cleanup(func() { repl.Close(ctx) })
 
 	// Execute some code
-	_, err = repl.Feed(ctx, "1 + 1")
+	progress, err := repl.Feed(ctx, "1 + 1")
 	if err != nil {
 		t.Fatalf("feed: %v", err)
 	}
 
 	// Dump
-	dump1, err := repl.Dump(ctx)
+	dump1, err := progress.Complete.Repl.Dump(ctx)
 	if err != nil {
 		t.Fatalf("dump 1: %v", err)
 	}
 
 	// Execute more code
-	_, err = repl.Feed(ctx, "2 + 2")
+	progress, err = progress.Complete.Repl.Feed(ctx, "2 + 2")
 	if err != nil {
 		t.Fatalf("feed: %v", err)
 	}
 
 	// Dump again
-	if _, err = repl.Dump(ctx); err != nil {
+	if _, err = progress.Complete.Repl.Dump(ctx); err != nil {
 		t.Fatalf("dump 2: %v", err)
 	}
 
-	repl.Close(ctx)
+	progress.Complete.Repl.Close(ctx)
 
 	// Restore the REPL should work
 	repl2, err := rt.LoadRepl(ctx, dump1)
@@ -553,15 +562,18 @@ func TestReplMultipleDumps(t *testing.T) {
 	}
 
 	// The restored REPL should work
-	out, err := repl2.Feed(ctx, "3 + 3")
+	progress, err = repl2.Feed(ctx, "3 + 3")
 	if err != nil {
 		t.Fatalf("feed after load: %v", err)
 	}
-	if out == nil {
+	if progress.Kind != ReplProgressComplete {
+		t.Fatalf("expected complete, got %v", progress.Kind)
+	}
+	if progress.Result == nil {
 		t.Fatal("expected result")
 	}
 	var got int
-	if err := out.Decode(&got); err != nil {
+	if err := progress.Result.Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if got != 6 {

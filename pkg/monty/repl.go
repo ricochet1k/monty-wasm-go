@@ -43,6 +43,13 @@ type ReplProgress struct {
 	OS         *ReplOsCall
 	NameLookup *ReplNameLookup
 	Futures    *ReplResolveFutures
+	Complete   *ReplSnippetComplete
+}
+
+// ReplComplete represents the result when a REPL snippet completes.
+type ReplSnippetComplete struct {
+	Repl   *Repl
+	Result Value
 }
 
 // Resume resumes execution with a result.
@@ -545,28 +552,44 @@ func (r *Repl) Start(ctx context.Context, code string, inputs ...any) (ReplProgr
 	return r.rt.DecodeReplProgressFromBlob(ctx, id)
 }
 
-// Feed executes code synchronously (no suspension).
-func (r *Repl) Feed(ctx context.Context, code string) (Value, error) {
+// Feed executes code with suspension support.
+func (r *Repl) Feed(ctx context.Context, code string) (ReplProgress, error) {
 	if r == nil || r.rt == nil || r.id == 0 {
-		return nil, errors.New("monty: closed repl")
+		return ReplProgress{}, errors.New("monty: closed repl")
 	}
 	codeArg, done, err := r.rt.arg(ctx, []byte(code))
 	if err != nil {
-		return nil, err
+		return ReplProgress{}, err
 	}
 	defer done()
-	id, err := r.rt.callID(ctx, r.rt.fnReplFeed, r.id, codeArg.ptr, codeArg.len)
+	id, err := r.rt.callID(ctx, r.rt.fnReplFeedProgress, r.id, codeArg.ptr, codeArg.len)
 	if err != nil {
-		return nil, err
+		return ReplProgress{}, err
 	}
 	if id == 0 {
-		return nil, nil // None result
+		// Check for ReplStartError - the repl_id is stored in last_error
+		msg, readErr := r.rt.lastError(ctx)
+		if readErr != nil {
+			return ReplProgress{}, readErr
+		}
+		if msg == "" {
+			msg = "unknown error"
+		}
+		// Try to extract new repl_id from the error message (format: "error (repl_id=123)")
+		newReplID := r.id
+		if idx := strings.LastIndex(msg, "repl_id="); idx != -1 {
+			if endIdx := strings.Index(msg[idx+8:], ")"); endIdx != -1 {
+				if idStr := msg[idx+8 : idx+8+endIdx]; idStr != "" {
+					if parsed, err := strconv.ParseUint(idStr, 10, 64); err == nil {
+						newReplID = parsed
+					}
+				}
+			}
+		}
+		return ReplProgress{}, &ReplStartError{Message: msg, ReplID: newReplID}
 	}
-	buf, err := r.rt.readBlob(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	return Value(buf), nil
+	r.id = 0
+	return r.rt.DecodeReplProgressFromBlob(ctx, id)
 }
 
 // CheckContinuation checks if code is complete or needs more input.

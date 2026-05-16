@@ -220,13 +220,15 @@ fn encode_repl_progress(
     progress: ReplProgress<NoLimitTracker>,
 ) -> BridgeResult<u64> {
     let payload = match progress {
-        ReplProgress::Complete { repl: _, value } => {
-            // Update REPL in state with the returned one
-            // We don't know the repl_id here, so we store the value and update later
+        ReplProgress::Complete { repl, value } => {
+            // Store the updated REPL back in state with a new ID
+            let repl_id = state.alloc_id();
+            state.repls.insert(repl_id, repl);
             let result_json = encode_object(&value)?;
             json!({
                 "kind": "complete",
                 "result": serde_json::from_str::<Value>(&result_json)?,
+                "repl_id": repl_id,
             })
         }
         ReplProgress::FunctionCall(fc) => {
@@ -951,6 +953,38 @@ pub unsafe extern "C" fn monty_repl_feed(repl_id: u64, code_ptr: u32, code_len: 
         } else {
             let result_json = encode_object(&result)?;
             Ok(store_blob(state, result_json.into_bytes()))
+        }
+    })
+}
+
+/// Feed code with suspension support, returns full ReplProgress
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn monty_repl_feed_progress(
+    repl_id: u64,
+    code_ptr: u32,
+    code_len: u32,
+) -> u64 {
+    with_state(|state| {
+        let code = read_string(code_ptr, code_len)?;
+        // Remove REPL from state to consume it
+        let repl = state
+            .repls
+            .remove(&repl_id)
+            .ok_or_else(|| BridgeError::Message("unknown repl id".into()))?;
+        // feed_start consumes self and returns ReplProgress
+        match repl.feed_start(&code, Vec::new(), PrintWriter::Stdout) {
+            Ok(progress) => encode_repl_progress(state, progress),
+            Err(start_err) => {
+                let err_str = start_err.error.summary();
+                let repl = start_err.repl;
+                // Store the REPL back in state with a new ID
+                let new_repl_id = state.alloc_id();
+                state.repls.insert(new_repl_id, repl);
+                // Include the new REPL ID in the error message so Go can use it
+                let full_err = format!("{} (repl_id={})", err_str, new_repl_id);
+                state.set_error(full_err);
+                Ok(0)
+            }
         }
     })
 }
