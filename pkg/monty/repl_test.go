@@ -337,12 +337,6 @@ func TestReplNilSafety(t *testing.T) {
 		t.Fatal("expected error on nil repl start")
 	}
 
-	// Resume on nil REPL
-	_, err = repl.Resume(context.Background(), ReplProgress{}, nil)
-	if err == nil {
-		t.Fatal("expected error on nil repl resume")
-	}
-
 	// Dump on nil REPL
 	_, err = repl.Dump(context.Background())
 	if err == nil {
@@ -467,8 +461,11 @@ func TestReplResumeCompleteProgress(t *testing.T) {
 		t.Fatalf("expected complete, got %v", progress.Kind)
 	}
 
+	// TODO: The repl isn't yet being sent from rust/monty-wasm or handled correctly in Go, but this is how it should work.
+	repl := progress.Complete.Repl
+
 	// Resume on complete progress should return the same progress
-	next, err := repl.Resume(ctx, progress, nil)
+	next, err := repl.Feed(ctx, "2+2")
 	if err != nil {
 		t.Fatalf("resume complete: %v", err)
 	}

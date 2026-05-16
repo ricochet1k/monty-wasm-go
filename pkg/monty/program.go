@@ -128,50 +128,6 @@ func (c *OSCall) Close(ctx context.Context) {
 	}
 }
 
-type Continuation struct {
-	resume *snapshotResume
-}
-
-func (r *Runtime) LoadContinuation(ctx context.Context, data []byte) (*Continuation, error) {
-	arg, done, err := r.arg(ctx, data)
-	if err != nil {
-		return nil, err
-	}
-	defer done()
-	id, err := r.callID(ctx, r.fnSnapshotLoad, arg.ptr, arg.len)
-	if err != nil {
-		return nil, err
-	}
-	return &Continuation{resume: &snapshotResume{rt: r, snapshotID: id}}, nil
-}
-
-func (c *Continuation) Return(ctx context.Context, result any) (Progress, error) {
-	if c == nil || c.resume == nil {
-		return Progress{}, errors.New("monty: continuation not resumable")
-	}
-	return c.resume.resumeResult(ctx, result)
-}
-
-func (c *Continuation) Throw(ctx context.Context, message string) (Progress, error) {
-	if c == nil || c.resume == nil {
-		return Progress{}, errors.New("monty: continuation not resumable")
-	}
-	return c.resume.resumeError(ctx, message)
-}
-
-func (c *Continuation) Defer(ctx context.Context) (Progress, error) {
-	if c == nil || c.resume == nil {
-		return Progress{}, errors.New("monty: continuation not resumable")
-	}
-	return c.resume.resumeFuture(ctx)
-}
-
-func (c *Continuation) Close(ctx context.Context) {
-	if c != nil && c.resume != nil {
-		c.resume.close(ctx)
-	}
-}
-
 func (c *OSCall) Return(ctx context.Context, result any) (Progress, error) {
 	if c == nil || c.resume == nil {
 		return Progress{}, errors.New("monty: os call not resumable")
@@ -230,6 +186,7 @@ func (f *PendingFutures) Resume(ctx context.Context, results []FutureResult) (Pr
 	return progress, nil
 }
 
+// Dumps bytes that must be loaded by Runtime.LoadPendingFutures, you will need PendingFutures.PendingIDs too.
 func (f *PendingFutures) Dump(ctx context.Context) ([]byte, error) {
 	if f == nil || f.snapshotID == 0 || f.rt == nil {
 		return nil, errors.New("monty: closed future snapshot")
@@ -248,6 +205,7 @@ func (f *PendingFutures) Close(ctx context.Context) {
 	}
 }
 
+// LoadPendingFutures recreates a PendingFutures from a PendingFutures.Dump
 func (r *Runtime) LoadPendingFutures(ctx context.Context, data []byte, pendingIDs []uint32) (*PendingFutures, error) {
 	arg, done, err := r.arg(ctx, data)
 	if err != nil {

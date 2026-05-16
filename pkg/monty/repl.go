@@ -545,19 +545,6 @@ func (r *Repl) Start(ctx context.Context, code string, inputs ...any) (ReplProgr
 	return r.rt.DecodeReplProgressFromBlob(ctx, id)
 }
 
-// Resume resumes from a progress snapshot.
-//
-// Deprecated: Use ReplProgress.Resume instead.
-func (r *Repl) Resume(ctx context.Context, progress ReplProgress, result any) (ReplProgress, error) {
-	if r == nil || r.rt == nil {
-		return ReplProgress{}, errors.New("monty: repl already consumed by Start — Resume requires a valid REPL; create a new REPL instead")
-	}
-	if progress.Kind == ReplProgressComplete {
-		return progress, nil
-	}
-	return progress.Resume(ctx, r.rt, result)
-}
-
 // Feed executes code synchronously (no suspension).
 func (r *Repl) Feed(ctx context.Context, code string) (Value, error) {
 	if r == nil || r.rt == nil || r.id == 0 {
@@ -611,7 +598,7 @@ func (r *Repl) Dump(ctx context.Context) ([]byte, error) {
 	return r.rt.readBlob(ctx, blobID)
 }
 
-// LoadRepl loads a REPL state from serialized data.
+// LoadRepl loads a REPL state from Repl.Dump-ed data
 func (rt *Runtime) LoadRepl(ctx context.Context, data []byte) (*Repl, error) {
 	arg, done, err := rt.arg(ctx, data)
 	if err != nil {
