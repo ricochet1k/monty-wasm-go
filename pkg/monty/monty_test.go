@@ -7,7 +7,7 @@ import (
 
 func TestRunComplete(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	prog, err := rt.Compile(ctx, "x + 1", CompileOptions{InputNames: []string{"x"}})
 	if err != nil {
@@ -30,7 +30,7 @@ func TestRunComplete(t *testing.T) {
 
 func TestFunctionCallResume(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	prog, err := rt.Compile(ctx, "external_add(x, 10) * 2", CompileOptions{
 		InputNames: []string{"x"},
@@ -104,7 +104,7 @@ func TestFunctionCallResume(t *testing.T) {
 
 func TestFunctionCallLocation(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	prog, err := rt.Compile(ctx, "external_add(x, 10) * 2", CompileOptions{
 		InputNames: []string{"x"},
@@ -188,13 +188,13 @@ func TestFunctionCallLocation(t *testing.T) {
 
 func TestReplFunctionCallLocation(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	repl, err := NewRepl(ctx, rt, "test.py")
 	if err != nil {
 		t.Fatalf("new repl: %v", err)
 	}
-	t.Cleanup(repl.Close)
+	t.Cleanup(func() { repl.Close(ctx) })
 
 	// Start code that calls an external function
 	progress, err := repl.Start(ctx, "external_add(1, 2)")
@@ -255,7 +255,7 @@ func TestReplFunctionCallLocation(t *testing.T) {
 
 func TestProgramDumpLoad(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	prog, err := rt.Compile(ctx, "x + y", CompileOptions{InputNames: []string{"x", "y"}})
 	if err != nil {
@@ -284,18 +284,4 @@ func TestProgramDumpLoad(t *testing.T) {
 	if got != 42 {
 		t.Fatalf("expected 42, got %d", got)
 	}
-}
-
-func newRuntime(t *testing.T, ctx context.Context) *Runtime {
-	t.Helper()
-	rt, err := NewRuntime(ctx)
-	if err != nil {
-		t.Fatalf("new runtime: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := rt.Close(ctx); err != nil {
-			t.Fatalf("close runtime: %v", err)
-		}
-	})
-	return rt
 }

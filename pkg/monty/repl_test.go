@@ -2,18 +2,35 @@ package monty
 
 import (
 	"context"
+	"sync"
 	"testing"
 )
 
+var sharedRt *Runtime
+var rtOnce sync.Once
+
+func sharedRuntime(t *testing.T) *Runtime {
+	rtOnce.Do(func() {
+		ctx := context.Background()
+		t.Helper()
+		rt, err := NewRuntime(ctx)
+		if err != nil {
+			t.Fatalf("new runtime: %v", err)
+		}
+		sharedRt = rt
+	})
+	return sharedRt
+}
+
 func TestReplFeed(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	repl, err := NewRepl(ctx, rt, "test.py")
 	if err != nil {
 		t.Fatalf("new repl: %v", err)
 	}
-	t.Cleanup(repl.Close)
+	t.Cleanup(func() { repl.Close(ctx) })
 
 	out, err := repl.Feed(ctx, "1 + 1")
 	if err != nil {
@@ -33,13 +50,13 @@ func TestReplFeed(t *testing.T) {
 
 func TestReplFeedMultiple(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	repl, err := NewRepl(ctx, rt, "test.py")
 	if err != nil {
 		t.Fatalf("new repl: %v", err)
 	}
-	t.Cleanup(repl.Close)
+	t.Cleanup(func() { repl.Close(ctx) })
 
 	// Multiple expressions should work
 	out, err := repl.Feed(ctx, "21 + 21")
@@ -75,13 +92,13 @@ func TestReplFeedMultiple(t *testing.T) {
 
 func TestReplStartComplete(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	repl, err := NewRepl(ctx, rt, "test.py")
 	if err != nil {
 		t.Fatalf("new repl: %v", err)
 	}
-	t.Cleanup(repl.Close)
+	t.Cleanup(func() { repl.Close(ctx) })
 
 	progress, err := repl.Start(ctx, "21 + 21")
 	if err != nil {
@@ -101,13 +118,13 @@ func TestReplStartComplete(t *testing.T) {
 
 func TestReplStartFunctionCall(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	repl, err := NewRepl(ctx, rt, "test.py")
 	if err != nil {
 		t.Fatalf("new repl: %v", err)
 	}
-	t.Cleanup(repl.Close)
+	t.Cleanup(func() { repl.Close(ctx) })
 
 	progress, err := repl.Start(ctx, "external_add(20, 22)")
 	if err != nil {
@@ -142,13 +159,13 @@ func TestReplStartFunctionCall(t *testing.T) {
 
 func TestReplStartFunctionCallThrow(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	repl, err := NewRepl(ctx, rt, "test.py")
 	if err != nil {
 		t.Fatalf("new repl: %v", err)
 	}
-	t.Cleanup(repl.Close)
+	t.Cleanup(func() { repl.Close(ctx) })
 
 	// Start a function call that will be thrown
 	progress, err := repl.Start(ctx, "external_add(1, 2)")
@@ -182,14 +199,14 @@ func TestReplStartFunctionCallThrow(t *testing.T) {
 
 func TestReplSuspendSerializeDeserializeResume(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	// Create REPL and execute code that suspends on function call
 	repl1, err := NewRepl(ctx, rt, "test.py")
 	if err != nil {
 		t.Fatalf("new repl 1: %v", err)
 	}
-	t.Cleanup(repl1.Close)
+	t.Cleanup(func() { repl1.Close(ctx) })
 
 	// Start will consume the REPL, so we need to handle this
 	progress, err := repl1.Start(ctx, "external_compute(20, 22)")
@@ -221,7 +238,7 @@ func TestReplSuspendSerializeDeserializeResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new repl 2: %v", err)
 	}
-	t.Cleanup(repl2.Close)
+	t.Cleanup(func() { repl2.Close(ctx) })
 
 	// Execute the same code to get the suspension
 	progress2, err := repl2.Start(ctx, "external_compute(20, 22)")
@@ -251,13 +268,13 @@ func TestReplSuspendSerializeDeserializeResume(t *testing.T) {
 
 func TestReplCheckContinuation(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	repl, err := NewRepl(ctx, rt, "test.py")
 	if err != nil {
 		t.Fatalf("new repl: %v", err)
 	}
-	t.Cleanup(repl.Close)
+	t.Cleanup(func() { repl.Close(ctx) })
 
 	// Complete statement
 	if mode := repl.CheckContinuation("1 + 1"); mode != ReplComplete {
@@ -279,13 +296,13 @@ func TestReplCheckContinuation(t *testing.T) {
 
 func TestReplErrorHandling(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	repl, err := NewRepl(ctx, rt, "test.py")
 	if err != nil {
 		t.Fatalf("new repl: %v", err)
 	}
-	t.Cleanup(repl.Close)
+	t.Cleanup(func() { repl.Close(ctx) })
 
 	// Execute code that causes an error
 	progress, err := repl.Start(ctx, "undefined_variable")
@@ -341,7 +358,7 @@ func TestReplNilSafety(t *testing.T) {
 
 func TestReplCloseIdempotent(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	repl, err := NewRepl(ctx, rt, "test.py")
 	if err != nil {
@@ -349,21 +366,21 @@ func TestReplCloseIdempotent(t *testing.T) {
 	}
 
 	// Close multiple times should not panic
-	repl.Close()
-	repl.Close()
-	repl.Close()
+	repl.Close(ctx)
+	repl.Close(ctx)
+	repl.Close(ctx)
 }
 
 func TestReplResumeWithDifferentResultTypes(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	// Test with string result - use a fresh REPL for each test
 	repl1, err := NewRepl(ctx, rt, "test.py")
 	if err != nil {
 		t.Fatalf("new repl 1: %v", err)
 	}
-	t.Cleanup(repl1.Close)
+	t.Cleanup(func() { repl1.Close(ctx) })
 
 	progress, err := repl1.Start(ctx, "external_echo('hello')")
 	if err != nil {
@@ -386,7 +403,7 @@ func TestReplResumeWithDifferentResultTypes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new repl 2: %v", err)
 	}
-	t.Cleanup(repl2.Close)
+	t.Cleanup(func() { repl2.Close(ctx) })
 
 	progress, err = repl2.Start(ctx, "external_echo(42)")
 	if err != nil {
@@ -409,7 +426,7 @@ func TestReplResumeWithDifferentResultTypes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new repl 3: %v", err)
 	}
-	t.Cleanup(repl3.Close)
+	t.Cleanup(func() { repl3.Close(ctx) })
 
 	progress, err = repl3.Start(ctx, "external_echo({})")
 	if err != nil {
@@ -433,13 +450,13 @@ func TestReplResumeWithDifferentResultTypes(t *testing.T) {
 
 func TestReplResumeCompleteProgress(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	repl, err := NewRepl(ctx, rt, "test.py")
 	if err != nil {
 		t.Fatalf("new repl: %v", err)
 	}
-	t.Cleanup(repl.Close)
+	t.Cleanup(func() { repl.Close(ctx) })
 
 	// Get a complete progress
 	progress, err := repl.Start(ctx, "1 + 1")
@@ -462,13 +479,13 @@ func TestReplResumeCompleteProgress(t *testing.T) {
 
 func TestReplFeedSyntaxError(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	repl, err := NewRepl(ctx, rt, "test.py")
 	if err != nil {
 		t.Fatalf("new repl: %v", err)
 	}
-	t.Cleanup(repl.Close)
+	t.Cleanup(func() { repl.Close(ctx) })
 
 	// Syntax error should return an error
 	_, err = repl.Feed(ctx, "defunc")
@@ -479,13 +496,13 @@ func TestReplFeedSyntaxError(t *testing.T) {
 
 func TestReplFeedException(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	repl, err := NewRepl(ctx, rt, "test.py")
 	if err != nil {
 		t.Fatalf("new repl: %v", err)
 	}
-	t.Cleanup(repl.Close)
+	t.Cleanup(func() { repl.Close(ctx) })
 
 	// Exception should be returned in the Value (may be None or error string)
 	out, err := repl.Feed(ctx, "1/0")
@@ -499,13 +516,13 @@ func TestReplFeedException(t *testing.T) {
 
 func TestReplMultipleDumps(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	repl, err := NewRepl(ctx, rt, "test.py")
 	if err != nil {
 		t.Fatalf("new repl: %v", err)
 	}
-	t.Cleanup(repl.Close)
+	t.Cleanup(func() { repl.Close(ctx) })
 
 	// Execute some code
 	_, err = repl.Feed(ctx, "1 + 1")
@@ -526,24 +543,15 @@ func TestReplMultipleDumps(t *testing.T) {
 	}
 
 	// Dump again
-	dump2, err := repl.Dump(ctx)
-	if err != nil {
+	if _, err = repl.Dump(ctx); err != nil {
 		t.Fatalf("dump 2: %v", err)
 	}
 
-	// The dumps should be different (different lengths)
-	if len(dump1) == len(dump2) {
-		t.Logf("dumps have same length (%d), checking content", len(dump1))
-	}
+	repl.Close(ctx)
 
-	// Restore from first dump
-	repl2, err := NewRepl(ctx, rt, "test2.py")
+	// Restore the REPL should work
+	repl2, err := rt.LoadRepl(ctx, dump1)
 	if err != nil {
-		t.Fatalf("new repl 2: %v", err)
-	}
-	t.Cleanup(repl2.Close)
-
-	if err := repl2.Load(ctx, dump1); err != nil {
 		t.Fatalf("load dump1: %v", err)
 	}
 
@@ -566,13 +574,13 @@ func TestReplMultipleDumps(t *testing.T) {
 
 func TestReplFunctionCallArgs(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	repl, err := NewRepl(ctx, rt, "test.py")
 	if err != nil {
 		t.Fatalf("new repl: %v", err)
 	}
-	t.Cleanup(repl.Close)
+	t.Cleanup(func() { repl.Close(ctx) })
 
 	progress, err := repl.Start(ctx, "external_add(10, 20)")
 	if err != nil {
@@ -620,14 +628,14 @@ func TestReplFunctionCallArgs(t *testing.T) {
 
 func TestReplFullSuspendSerializeDeserializeResumeCycle(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	// Phase 1: Create REPL, execute code that suspends on function call
 	repl1, err := NewRepl(ctx, rt, "phase1.py")
 	if err != nil {
 		t.Fatalf("new repl phase1: %v", err)
 	}
-	t.Cleanup(repl1.Close)
+	t.Cleanup(func() { repl1.Close(ctx) })
 
 	// Execute code that will suspend
 	progress1, err := repl1.Start(ctx, "external_compute(40, 2)")
@@ -663,7 +671,7 @@ func TestReplFullSuspendSerializeDeserializeResumeCycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new repl phase2: %v", err)
 	}
-	t.Cleanup(repl2.Close)
+	t.Cleanup(func() { repl2.Close(ctx) })
 
 	// Execute the same code to get the suspension
 	progress2, err := repl2.Start(ctx, "external_compute(40, 2)")
@@ -710,13 +718,13 @@ func TestReplFullSuspendSerializeDeserializeResumeCycle(t *testing.T) {
 
 func TestReplFunctionCallClose(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	repl, err := NewRepl(ctx, rt, "test.py")
 	if err != nil {
 		t.Fatalf("new repl: %v", err)
 	}
-	t.Cleanup(repl.Close)
+	t.Cleanup(func() { repl.Close(ctx) })
 
 	progress, err := repl.Start(ctx, "external_test()")
 	if err != nil {
@@ -743,14 +751,14 @@ func TestReplFunctionCallClose(t *testing.T) {
 // This test uses async code that creates pending futures which need to be resolved.
 func TestReplResolveFuturesDumpLoadResume(t *testing.T) {
 	ctx := context.Background()
-	rt := newRuntime(t, ctx)
+	rt := sharedRuntime(t)
 
 	// Create REPL
 	repl, err := NewRepl(ctx, rt, "test.py")
 	if err != nil {
 		t.Fatalf("new repl: %v", err)
 	}
-	t.Cleanup(repl.Close)
+	t.Cleanup(func() { repl.Close(ctx) })
 
 	// Start code that will suspend on futures (async code with external calls)
 	// This code uses asyncio.gather() with an external async function `foo`
