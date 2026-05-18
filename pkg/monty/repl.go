@@ -38,7 +38,6 @@ const (
 // ReplProgress is the result of Repl.Start().
 type ReplProgress struct {
 	Kind       ReplProgressKind
-	Result     Value
 	Call       *ReplFunctionCall
 	OS         *ReplOsCall
 	NameLookup *ReplNameLookup

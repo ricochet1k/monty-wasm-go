@@ -12,6 +12,7 @@ type Program struct {
 	id uint64
 }
 
+// Start consumes this program, returns a progress
 func (p *Program) Start(ctx context.Context, inputs ...any) (Progress, error) {
 	if p == nil || p.rt == nil || p.id == 0 {
 		return Progress{}, errors.New("monty: closed program")
@@ -28,6 +29,7 @@ func (p *Program) Start(ctx context.Context, inputs ...any) (Progress, error) {
 	return p.rt.callProgress(ctx, p.rt.fnRunStart, p.id, arg.ptr, arg.len)
 }
 
+// Run runs a snippet of code that's not allowed to call anything external
 func (p *Program) Run(ctx context.Context, inputs ...any) (Value, error) {
 	progress, err := p.Start(ctx, inputs...)
 	if err != nil {

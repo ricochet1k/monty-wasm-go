@@ -252,12 +252,12 @@ func (r *Runtime) decodeReplProgress(payload []byte) (ReplProgress, error) {
 	switch raw.Kind {
 	case "complete":
 		progress.Kind = ReplProgressComplete
-		progress.Result = append(Value{}, raw.Result...)
+		progress.Complete = &ReplSnippetComplete{
+			Result: append(Value{}, raw.Result...),
+		}
 		if raw.ReplID != 0 {
-			progress.Complete = &ReplSnippetComplete{
-				Repl:   &Repl{rt: r, id: raw.ReplID},
-				Result: progress.Result,
-			}
+			// TODO: this is probably always true?
+			progress.Complete.Repl = &Repl{rt: r, id: raw.ReplID}
 		}
 	case "function_call":
 		progress.Kind = ReplProgressFunctionCall
@@ -512,7 +512,6 @@ func (r *Runtime) LoadSnapshot(ctx context.Context, data []byte) (ReplProgress, 
 	// Build the ReplProgress based on kind
 	progress := ReplProgress{
 		Kind:       r.kindFromString(info.Kind),
-		Result:     nil,
 		Call:       nil,
 		OS:         nil,
 		NameLookup: nil,

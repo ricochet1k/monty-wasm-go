@@ -39,11 +39,11 @@ func TestReplFeed(t *testing.T) {
 	if progress.Kind != ReplProgressComplete {
 		t.Fatalf("expected complete, got %v", progress.Kind)
 	}
-	if progress.Result == nil {
+	if progress.Complete.Result == nil {
 		t.Fatal("expected result, got nil")
 	}
 	var got int
-	if err := progress.Result.Decode(&got); err != nil {
+	if err := progress.Complete.Result.Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if got != 2 {
@@ -69,11 +69,11 @@ func TestReplFeedMultiple(t *testing.T) {
 	if progress.Kind != ReplProgressComplete {
 		t.Fatalf("expected complete, got %v", progress.Kind)
 	}
-	if progress.Result == nil {
+	if progress.Complete.Result == nil {
 		t.Fatal("expected result, got nil")
 	}
 	var got int
-	if err := progress.Result.Decode(&got); err != nil {
+	if err := progress.Complete.Result.Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if got != 42 {
@@ -88,10 +88,10 @@ func TestReplFeedMultiple(t *testing.T) {
 	if progress.Kind != ReplProgressComplete {
 		t.Fatalf("expected complete, got %v", progress.Kind)
 	}
-	if progress.Result == nil {
+	if progress.Complete.Result == nil {
 		t.Fatal("expected result, got nil")
 	}
-	if err := progress.Result.Decode(&got); err != nil {
+	if err := progress.Complete.Result.Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if got != 42 {
@@ -117,7 +117,7 @@ func TestReplStartComplete(t *testing.T) {
 		t.Fatalf("expected complete, got %v", progress.Kind)
 	}
 	var got int
-	if err := progress.Result.Decode(&got); err != nil {
+	if err := progress.Complete.Result.Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if got != 42 {
@@ -158,7 +158,7 @@ func TestReplStartFunctionCall(t *testing.T) {
 		t.Fatalf("expected complete, got %v", next.Kind)
 	}
 	var got int
-	if err := next.Result.Decode(&got); err != nil {
+	if err := next.Complete.Result.Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if got != 42 {
@@ -198,7 +198,7 @@ func TestReplStartFunctionCallThrow(t *testing.T) {
 		t.Fatalf("expected complete, got %v", next.Kind)
 	}
 	var got int
-	if err := next.Result.Decode(&got); err != nil {
+	if err := next.Complete.Result.Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if got != 3 {
@@ -267,7 +267,7 @@ func TestReplSuspendSerializeDeserializeResume(t *testing.T) {
 		t.Fatalf("expected complete, got %v", next.Kind)
 	}
 	var got int
-	if err := next.Result.Decode(&got); err != nil {
+	if err := next.Complete.Result.Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if got != 42 {
@@ -517,7 +517,7 @@ func TestReplFeedException(t *testing.T) {
 		t.Logf("feed exception returned error: %v", err)
 		return
 	}
-	t.Logf("feed exception returned: %v", progress.Result)
+	t.Logf("feed exception returned: %v", progress.Complete.Result)
 }
 
 func TestReplMultipleDumps(t *testing.T) {
@@ -569,11 +569,11 @@ func TestReplMultipleDumps(t *testing.T) {
 	if progress.Kind != ReplProgressComplete {
 		t.Fatalf("expected complete, got %v", progress.Kind)
 	}
-	if progress.Result == nil {
+	if progress.Complete.Result == nil {
 		t.Fatal("expected result")
 	}
 	var got int
-	if err := progress.Result.Decode(&got); err != nil {
+	if err := progress.Complete.Result.Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if got != 6 {
@@ -627,7 +627,7 @@ func TestReplFunctionCallArgs(t *testing.T) {
 		t.Fatalf("expected complete, got %v", next.Kind)
 	}
 	var result int
-	if err := next.Result.Decode(&result); err != nil {
+	if err := next.Complete.Result.Decode(&result); err != nil {
 		t.Fatalf("decode result: %v", err)
 	}
 	if result != 30 {
@@ -717,7 +717,7 @@ func TestReplFullSuspendSerializeDeserializeResumeCycle(t *testing.T) {
 
 	// Verify the final result
 	var result int
-	if err := next.Result.Decode(&result); err != nil {
+	if err := next.Complete.Result.Decode(&result); err != nil {
 		t.Fatalf("decode result: %v", err)
 	}
 	if result != 42 {
@@ -861,7 +861,7 @@ got_resolve_futures:
 
 	// Verify the result
 	var got int
-	if err := next.Result.Decode(&got); err != nil {
+	if err := next.Complete.Result.Decode(&got); err != nil {
 		t.Fatalf("decode result: %v", err)
 	}
 	if got != 42 {

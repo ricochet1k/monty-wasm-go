@@ -245,7 +245,7 @@ func TestReplFunctionCallLocation(t *testing.T) {
 	}
 
 	var result int
-	if err := next.Result.Decode(&result); err != nil {
+	if err := next.Complete.Result.Decode(&result); err != nil {
 		t.Fatalf("decode result: %v", err)
 	}
 	if result != a+b {
