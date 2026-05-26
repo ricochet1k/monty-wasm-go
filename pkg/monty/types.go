@@ -31,15 +31,28 @@ type KeywordArg struct {
 	Value Value
 }
 
-type Progress struct {
-	Kind       Kind
-	Result     Value
-	Call       *Call
-	OSCall     *OSCall
-	Futures    *PendingFutures
-	NameLookup *NameLookup
-	rawCallID  uint32
+// Progress represents the result of a program execution.
+// Use a type switch or type assertion to access the specific variant:
+//
+//	switch p := prog.Start(...) (type) {
+//	case *ProgressComplete:
+//	case *Call:
+//	case *OSCall:
+//	case *PendingFutures:
+//	case *NameLookup:
+//	}
+type Progress interface {
+	Kind() Kind
+	progressPrivate()
 }
+
+// ProgressComplete indicates execution completed successfully.
+type ProgressComplete struct {
+	Result Value
+}
+
+func (p *ProgressComplete) Kind() Kind       { return KindComplete }
+func (p *ProgressComplete) progressPrivate() {}
 
 type FutureResult struct {
 	CallID uint32
@@ -59,6 +72,8 @@ type NameLookup struct {
 	snapshotType string
 }
 
+func (n *NameLookup) Kind() Kind       { return KindNameLookup }
+func (n *NameLookup) progressPrivate() {}
 func (n *NameLookup) Dump(ctx context.Context) ([]byte, error) {
 	if n == nil || n.snapshotID == 0 || n.rt == nil {
 		return nil, errors.New("monty: name lookup not resumable")
@@ -79,26 +94,26 @@ func (n *NameLookup) Close(ctx context.Context) {
 
 func (n *NameLookup) Resume(ctx context.Context, value any) (Progress, error) {
 	if n == nil || n.snapshotID == 0 || n.rt == nil {
-		return Progress{}, errors.New("monty: name lookup not resumable")
+		return nil, errors.New("monty: name lookup not resumable")
 	}
 	data, err := json.Marshal(value)
 	if err != nil {
-		return Progress{}, fmt.Errorf("monty: encode name lookup result: %w", err)
+		return nil, fmt.Errorf("monty: encode name lookup result: %w", err)
 	}
 	arg, done, err := n.rt.arg(ctx, data)
 	if err != nil {
-		return Progress{}, err
+		return nil, err
 	}
 	defer done()
 	typeJSON := fmt.Sprintf(`"%s"`, n.snapshotType)
 	typeArg, typeDone, err := n.rt.arg(ctx, []byte(typeJSON))
 	if err != nil {
-		return Progress{}, err
+		return nil, err
 	}
 	defer typeDone()
 	progress, err := n.rt.callProgress(ctx, n.rt.fnSnapshotResume, n.snapshotID, 0, 0, arg.ptr, arg.len, 0, 0, typeArg.ptr, typeArg.len)
 	if err != nil {
-		return Progress{}, err
+		return nil, err
 	}
 	n.snapshotID = 0
 	return progress, nil

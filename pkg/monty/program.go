@@ -15,15 +15,15 @@ type Program struct {
 // Start consumes this program, returns a progress
 func (p *Program) Start(ctx context.Context, inputs ...any) (Progress, error) {
 	if p == nil || p.rt == nil || p.id == 0 {
-		return Progress{}, errors.New("monty: closed program")
+		return nil, errors.New("monty: closed program")
 	}
 	encoded, err := json.Marshal(inputs)
 	if err != nil {
-		return Progress{}, fmt.Errorf("monty: encode inputs: %w", err)
+		return nil, fmt.Errorf("monty: encode inputs: %w", err)
 	}
 	arg, done, err := p.rt.arg(ctx, encoded)
 	if err != nil {
-		return Progress{}, err
+		return nil, err
 	}
 	defer done()
 	return p.rt.callProgress(ctx, p.rt.fnRunStart, p.id, arg.ptr, arg.len)
@@ -35,10 +35,10 @@ func (p *Program) Run(ctx context.Context, inputs ...any) (Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	if progress.Kind != KindComplete {
-		return nil, fmt.Errorf("monty: execution paused with kind %v", progress.Kind)
+	if _, ok := progress.(*ProgressComplete); !ok {
+		return nil, fmt.Errorf("monty: execution paused with kind %v", progress.Kind())
 	}
-	return progress.Result, nil
+	return progress.(*ProgressComplete).Result, nil
 }
 
 func (p *Program) Dump(ctx context.Context) ([]byte, error) {
@@ -74,6 +74,9 @@ type Call struct {
 	resume       *snapshotResume
 }
 
+func (c *Call) Kind() Kind       { return KindFunctionCall }
+func (c *Call) progressPrivate() {}
+
 func (c *Call) Dump(ctx context.Context) ([]byte, error) {
 	if c == nil || c.resume == nil {
 		return nil, errors.New("monty: call not resumable")
@@ -89,21 +92,21 @@ func (c *Call) Close(ctx context.Context) {
 
 func (c *Call) Return(ctx context.Context, result any) (Progress, error) {
 	if c == nil || c.resume == nil {
-		return Progress{}, errors.New("monty: call not resumable")
+		return nil, errors.New("monty: call not resumable")
 	}
 	return c.resume.resumeResult(ctx, result)
 }
 
 func (c *Call) Throw(ctx context.Context, message string) (Progress, error) {
 	if c == nil || c.resume == nil {
-		return Progress{}, errors.New("monty: call not resumable")
+		return nil, errors.New("monty: call not resumable")
 	}
 	return c.resume.resumeError(ctx, message)
 }
 
 func (c *Call) Defer(ctx context.Context) (Progress, error) {
 	if c == nil || c.resume == nil {
-		return Progress{}, errors.New("monty: call not resumable")
+		return nil, errors.New("monty: call not resumable")
 	}
 	return c.resume.resumeFuture(ctx)
 }
@@ -116,6 +119,9 @@ type OSCall struct {
 	snapshotType string
 	resume       *snapshotResume
 }
+
+func (c *OSCall) Kind() Kind       { return KindOSCall }
+func (c *OSCall) progressPrivate() {}
 
 func (c *OSCall) Dump(ctx context.Context) ([]byte, error) {
 	if c == nil || c.resume == nil {
@@ -132,21 +138,21 @@ func (c *OSCall) Close(ctx context.Context) {
 
 func (c *OSCall) Return(ctx context.Context, result any) (Progress, error) {
 	if c == nil || c.resume == nil {
-		return Progress{}, errors.New("monty: os call not resumable")
+		return nil, errors.New("monty: os call not resumable")
 	}
 	return c.resume.resumeResult(ctx, result)
 }
 
 func (c *OSCall) Throw(ctx context.Context, message string) (Progress, error) {
 	if c == nil || c.resume == nil {
-		return Progress{}, errors.New("monty: os call not resumable")
+		return nil, errors.New("monty: os call not resumable")
 	}
 	return c.resume.resumeError(ctx, message)
 }
 
 func (c *OSCall) Defer(ctx context.Context) (Progress, error) {
 	if c == nil || c.resume == nil {
-		return Progress{}, errors.New("monty: os call not resumable")
+		return nil, errors.New("monty: os call not resumable")
 	}
 	return c.resume.resumeFuture(ctx)
 }
@@ -157,9 +163,11 @@ type PendingFutures struct {
 	snapshotID uint64
 }
 
+func (f *PendingFutures) Kind() Kind       { return KindResolveFutures }
+func (f *PendingFutures) progressPrivate() {}
 func (f *PendingFutures) Resume(ctx context.Context, results []FutureResult) (Progress, error) {
 	if f == nil || f.snapshotID == 0 || f.rt == nil {
-		return Progress{}, errors.New("monty: futures not resumable")
+		return nil, errors.New("monty: futures not resumable")
 	}
 	payload := make([]map[string]any, 0, len(results))
 	for _, entry := range results {
@@ -173,16 +181,16 @@ func (f *PendingFutures) Resume(ctx context.Context, results []FutureResult) (Pr
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return Progress{}, fmt.Errorf("monty: encode future results: %w", err)
+		return nil, fmt.Errorf("monty: encode future results: %w", err)
 	}
 	arg, done, err := f.rt.arg(ctx, data)
 	if err != nil {
-		return Progress{}, err
+		return nil, err
 	}
 	defer done()
 	progress, err := f.rt.callProgress(ctx, f.rt.fnFutureSnapshotRun, f.snapshotID, arg.ptr, arg.len)
 	if err != nil {
-		return Progress{}, err
+		return nil, err
 	}
 	f.snapshotID = 0
 	return progress, nil
@@ -248,26 +256,26 @@ func (s *snapshotResume) close(ctx context.Context) {
 
 func (s *snapshotResume) resumeResult(ctx context.Context, result any) (Progress, error) {
 	if s.snapshotID == 0 {
-		return Progress{}, errors.New("monty: closed snapshot")
+		return nil, errors.New("monty: closed snapshot")
 	}
 	data, err := json.Marshal(result)
 	if err != nil {
-		return Progress{}, fmt.Errorf("monty: encode result: %w", err)
+		return nil, fmt.Errorf("monty: encode result: %w", err)
 	}
 	arg, done, err := s.rt.arg(ctx, data)
 	if err != nil {
-		return Progress{}, err
+		return nil, err
 	}
 	defer done()
 	typeJSON := fmt.Sprintf(`"%s"`, s.snapshotType)
 	typeArg, typeDone, err := s.rt.arg(ctx, []byte(typeJSON))
 	if err != nil {
-		return Progress{}, err
+		return nil, err
 	}
 	defer typeDone()
 	progress, err := s.rt.callProgress(ctx, s.rt.fnSnapshotResume, s.snapshotID, uint64(s.callID), 0, arg.ptr, arg.len, 0, 0, typeArg.ptr, typeArg.len)
 	if err != nil {
-		return Progress{}, err
+		return nil, err
 	}
 	s.snapshotID = 0
 	return progress, nil
@@ -275,22 +283,22 @@ func (s *snapshotResume) resumeResult(ctx context.Context, result any) (Progress
 
 func (s *snapshotResume) resumeError(ctx context.Context, message string) (Progress, error) {
 	if s.snapshotID == 0 {
-		return Progress{}, errors.New("monty: closed snapshot")
+		return nil, errors.New("monty: closed snapshot")
 	}
 	arg, done, err := s.rt.arg(ctx, []byte(message))
 	if err != nil {
-		return Progress{}, err
+		return nil, err
 	}
 	defer done()
 	typeJSON := fmt.Sprintf(`"%s"`, s.snapshotType)
 	typeArg, typeDone, err := s.rt.arg(ctx, []byte(typeJSON))
 	if err != nil {
-		return Progress{}, err
+		return nil, err
 	}
 	defer typeDone()
 	progress, err := s.rt.callProgress(ctx, s.rt.fnSnapshotResume, s.snapshotID, uint64(s.callID), 1, 0, 0, arg.ptr, arg.len, typeArg.ptr, typeArg.len)
 	if err != nil {
-		return Progress{}, err
+		return nil, err
 	}
 	s.snapshotID = 0
 	return progress, nil
@@ -298,17 +306,17 @@ func (s *snapshotResume) resumeError(ctx context.Context, message string) (Progr
 
 func (s *snapshotResume) resumeFuture(ctx context.Context) (Progress, error) {
 	if s.snapshotID == 0 {
-		return Progress{}, errors.New("monty: closed snapshot")
+		return nil, errors.New("monty: closed snapshot")
 	}
 	typeJSON := fmt.Sprintf(`"%s"`, s.snapshotType)
 	typeArg, typeDone, err := s.rt.arg(ctx, []byte(typeJSON))
 	if err != nil {
-		return Progress{}, err
+		return nil, err
 	}
 	defer typeDone()
 	progress, err := s.rt.callProgress(ctx, s.rt.fnSnapshotResume, s.snapshotID, uint64(s.callID), 2, 0, 0, 0, 0, typeArg.ptr, typeArg.len)
 	if err != nil {
-		return Progress{}, err
+		return nil, err
 	}
 	s.snapshotID = 0
 	return progress, nil

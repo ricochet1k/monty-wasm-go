@@ -36,14 +36,14 @@ func TestReplFeed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("feed: %v", err)
 	}
-	if progress.Kind != ReplProgressComplete {
-		t.Fatalf("expected complete, got %v", progress.Kind)
+	if progress.Kind() != ReplKindComplete {
+		t.Fatalf("expected complete, got %v", progress.Kind())
 	}
-	if progress.Complete.Result == nil {
+	if progress.(*ReplSnippetComplete).Result == nil {
 		t.Fatal("expected result, got nil")
 	}
 	var got int
-	if err := progress.Complete.Result.Decode(&got); err != nil {
+	if err := progress.(*ReplSnippetComplete).Result.Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if got != 2 {
@@ -66,14 +66,14 @@ func TestReplFeedMultiple(t *testing.T) {
 	if err != nil {
 		t.Fatalf("feed: %v", err)
 	}
-	if progress.Kind != ReplProgressComplete {
-		t.Fatalf("expected complete, got %v", progress.Kind)
+	if progress.Kind() != ReplKindComplete {
+		t.Fatalf("expected complete, got %v", progress.Kind())
 	}
-	if progress.Complete.Result == nil {
+	if progress.(*ReplSnippetComplete).Result == nil {
 		t.Fatal("expected result, got nil")
 	}
 	var got int
-	if err := progress.Complete.Result.Decode(&got); err != nil {
+	if err := progress.(*ReplSnippetComplete).Result.Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if got != 42 {
@@ -81,17 +81,17 @@ func TestReplFeedMultiple(t *testing.T) {
 	}
 
 	// Another expression - use the repl from the previous Complete progress
-	progress, err = progress.Complete.Repl.Feed(ctx, "100 - 58")
+	progress, err = progress.(*ReplSnippetComplete).Repl.Feed(ctx, "100 - 58")
 	if err != nil {
 		t.Fatalf("feed: %v", err)
 	}
-	if progress.Kind != ReplProgressComplete {
-		t.Fatalf("expected complete, got %v", progress.Kind)
+	if progress.Kind() != ReplKindComplete {
+		t.Fatalf("expected complete, got %v", progress.Kind())
 	}
-	if progress.Complete.Result == nil {
+	if progress.(*ReplSnippetComplete).Result == nil {
 		t.Fatal("expected result, got nil")
 	}
-	if err := progress.Complete.Result.Decode(&got); err != nil {
+	if err := progress.(*ReplSnippetComplete).Result.Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if got != 42 {
@@ -113,11 +113,11 @@ func TestReplStartComplete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if progress.Kind != ReplProgressComplete {
-		t.Fatalf("expected complete, got %v", progress.Kind)
+	if progress.Kind() != ReplKindComplete {
+		t.Fatalf("expected complete, got %v", progress.Kind())
 	}
 	var got int
-	if err := progress.Complete.Result.Decode(&got); err != nil {
+	if err := progress.(*ReplSnippetComplete).Result.Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if got != 42 {
@@ -139,26 +139,26 @@ func TestReplStartFunctionCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if progress.Kind != ReplProgressFunctionCall {
-		t.Fatalf("expected function call, got %v", progress.Kind)
+	if progress.Kind() != ReplKindFunctionCall {
+		t.Fatalf("expected function call, got %v", progress.Kind())
 	}
-	if progress.Call == nil {
+	if progress.(*ReplFunctionCall) == nil {
 		t.Fatal("expected call payload")
 	}
-	if progress.Call.FunctionName != "external_add" {
-		t.Fatalf("expected external_add, got %q", progress.Call.FunctionName)
+	if progress.(*ReplFunctionCall).FunctionName != "external_add" {
+		t.Fatalf("expected external_add, got %q", progress.(*ReplFunctionCall).FunctionName)
 	}
 
 	// Return the sum
-	next, err := progress.Call.Return(ctx, 42)
+	next, err := progress.(*ReplFunctionCall).Return(ctx, 42)
 	if err != nil {
 		t.Fatalf("return: %v", err)
 	}
-	if next.Kind != ReplProgressComplete {
-		t.Fatalf("expected complete, got %v", next.Kind)
+	if next.Kind() != ReplKindComplete {
+		t.Fatalf("expected complete, got %v", next.Kind())
 	}
 	var got int
-	if err := next.Complete.Result.Decode(&got); err != nil {
+	if err := next.(*ReplSnippetComplete).Result.Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if got != 42 {
@@ -181,24 +181,24 @@ func TestReplStartFunctionCallThrow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if progress.Kind != ReplProgressFunctionCall {
-		t.Fatalf("expected function call, got %v", progress.Kind)
+	if progress.Kind() != ReplKindFunctionCall {
+		t.Fatalf("expected function call, got %v", progress.Kind())
 	}
-	if progress.Call == nil {
+	if progress.(*ReplFunctionCall) == nil {
 		t.Fatal("expected call payload")
 	}
 
 	// Throw an error - this should work because Return also uses snapshot ID
 	// Note: Throw may not work in all cases, so we test that Return works
-	next, err := progress.Call.Return(ctx, 3)
+	next, err := progress.(*ReplFunctionCall).Return(ctx, 3)
 	if err != nil {
 		t.Fatalf("return: %v", err)
 	}
-	if next.Kind != ReplProgressComplete {
-		t.Fatalf("expected complete, got %v", next.Kind)
+	if next.Kind() != ReplKindComplete {
+		t.Fatalf("expected complete, got %v", next.Kind())
 	}
 	var got int
-	if err := next.Complete.Result.Decode(&got); err != nil {
+	if err := next.(*ReplSnippetComplete).Result.Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if got != 3 {
@@ -222,16 +222,16 @@ func TestReplSuspendSerializeDeserializeResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if progress.Kind != ReplProgressFunctionCall {
-		t.Fatalf("expected function call, got %v", progress.Kind)
+	if progress.Kind() != ReplKindFunctionCall {
+		t.Fatalf("expected function call, got %v", progress.Kind())
 	}
-	if progress.Call == nil {
+	if progress.(*ReplFunctionCall) == nil {
 		t.Fatal("expected call payload")
 	}
 
 	// Serialize the REPL state - this will fail because REPL is consumed
 	// Instead, we test that the function call snapshot can be serialized
-	snapshot, err := progress.Call.Dump(ctx)
+	snapshot, err := progress.(*ReplFunctionCall).Dump(ctx)
 	if err != nil {
 		t.Fatalf("dump snapshot: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestReplSuspendSerializeDeserializeResume(t *testing.T) {
 	}
 
 	// Close the snapshot
-	progress.Call.Close(ctx)
+	progress.(*ReplFunctionCall).Close(ctx)
 
 	// Now return the result using a fresh REPL
 	repl2, err := NewRepl(ctx, rt, "test2.py")
@@ -254,20 +254,20 @@ func TestReplSuspendSerializeDeserializeResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if progress2.Kind != ReplProgressFunctionCall {
-		t.Fatalf("expected function call, got %v", progress2.Kind)
+	if progress2.Kind() != ReplKindFunctionCall {
+		t.Fatalf("expected function call, got %v", progress2.Kind())
 	}
 
 	// Return the result
-	next, err := progress2.Call.Return(ctx, 42)
+	next, err := progress2.(*ReplFunctionCall).Return(ctx, 42)
 	if err != nil {
 		t.Fatalf("return: %v", err)
 	}
-	if next.Kind != ReplProgressComplete {
-		t.Fatalf("expected complete, got %v", next.Kind)
+	if next.Kind() != ReplKindComplete {
+		t.Fatalf("expected complete, got %v", next.Kind())
 	}
 	var got int
-	if err := next.Complete.Result.Decode(&got); err != nil {
+	if err := next.(*ReplSnippetComplete).Result.Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if got != 42 {
@@ -323,12 +323,12 @@ func TestReplErrorHandling(t *testing.T) {
 		return
 	}
 	// If no error, check that the progress is not nil
-	if progress.Kind == ReplProgressComplete {
+	if progress.Kind() == ReplKindComplete {
 		// Complete progress is OK
 		return
 	}
 	// If we get a NameLookup or FunctionCall, that's also OK (the interpreter may return these for undefined variables)
-	t.Logf("got progress kind: %v", progress.Kind)
+	t.Logf("got progress kind: %v", progress.Kind())
 }
 
 func TestReplNilSafety(t *testing.T) {
@@ -389,16 +389,16 @@ func TestReplResumeWithDifferentResultTypes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if progress.Kind != ReplProgressFunctionCall {
-		t.Fatalf("expected function call, got %v", progress.Kind)
+	if progress.Kind() != ReplKindFunctionCall {
+		t.Fatalf("expected function call, got %v", progress.Kind())
 	}
 
-	next, err := progress.Call.Return(ctx, "world")
+	next, err := progress.(*ReplFunctionCall).Return(ctx, "world")
 	if err != nil {
 		t.Fatalf("return string: %v", err)
 	}
-	if next.Kind != ReplProgressComplete {
-		t.Fatalf("expected complete, got %v", next.Kind)
+	if next.Kind() != ReplKindComplete {
+		t.Fatalf("expected complete, got %v", next.Kind())
 	}
 
 	// Test with int result - use a fresh REPL
@@ -412,16 +412,16 @@ func TestReplResumeWithDifferentResultTypes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if progress.Kind != ReplProgressFunctionCall {
-		t.Fatalf("expected function call, got %v", progress.Kind)
+	if progress.Kind() != ReplKindFunctionCall {
+		t.Fatalf("expected function call, got %v", progress.Kind())
 	}
 
-	next, err = progress.Call.Return(ctx, 100)
+	next, err = progress.(*ReplFunctionCall).Return(ctx, 100)
 	if err != nil {
 		t.Fatalf("return int: %v", err)
 	}
-	if next.Kind != ReplProgressComplete {
-		t.Fatalf("expected complete, got %v", next.Kind)
+	if next.Kind() != ReplKindComplete {
+		t.Fatalf("expected complete, got %v", next.Kind())
 	}
 
 	// Test with struct result - use a fresh REPL
@@ -435,19 +435,19 @@ func TestReplResumeWithDifferentResultTypes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if progress.Kind != ReplProgressFunctionCall {
-		t.Fatalf("expected function call, got %v", progress.Kind)
+	if progress.Kind() != ReplKindFunctionCall {
+		t.Fatalf("expected function call, got %v", progress.Kind())
 	}
 
 	type result struct {
 		Value int `json:"value"`
 	}
-	next, err = progress.Call.Return(ctx, result{Value: 42})
+	next, err = progress.(*ReplFunctionCall).Return(ctx, result{Value: 42})
 	if err != nil {
 		t.Fatalf("return struct: %v", err)
 	}
-	if next.Kind != ReplProgressComplete {
-		t.Fatalf("expected complete, got %v", next.Kind)
+	if next.Kind() != ReplKindComplete {
+		t.Fatalf("expected complete, got %v", next.Kind())
 	}
 }
 
@@ -466,20 +466,20 @@ func TestReplResumeCompleteProgress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if progress.Kind != ReplProgressComplete {
-		t.Fatalf("expected complete, got %v", progress.Kind)
+	if progress.Kind() != ReplKindComplete {
+		t.Fatalf("expected complete, got %v", progress.Kind())
 	}
 
 	// Resume using the repl from the Complete progress
-	resumedRepl := progress.Complete.Repl
+	resumedRepl := progress.(*ReplSnippetComplete).Repl
 
 	// Resume on complete progress should return the same progress
 	next, err := resumedRepl.Feed(ctx, "2+2")
 	if err != nil {
 		t.Fatalf("resume complete: %v", err)
 	}
-	if next.Kind != ReplProgressComplete {
-		t.Fatalf("expected complete, got %v", next.Kind)
+	if next.Kind() != ReplKindComplete {
+		t.Fatalf("expected complete, got %v", next.Kind())
 	}
 }
 
@@ -517,7 +517,7 @@ func TestReplFeedException(t *testing.T) {
 		t.Logf("feed exception returned error: %v", err)
 		return
 	}
-	t.Logf("feed exception returned: %v", progress.Complete.Result)
+	t.Logf("feed exception returned: %v", progress.(*ReplSnippetComplete).Result)
 }
 
 func TestReplMultipleDumps(t *testing.T) {
@@ -537,23 +537,23 @@ func TestReplMultipleDumps(t *testing.T) {
 	}
 
 	// Dump
-	dump1, err := progress.Complete.Repl.Dump(ctx)
+	dump1, err := progress.(*ReplSnippetComplete).Repl.Dump(ctx)
 	if err != nil {
 		t.Fatalf("dump 1: %v", err)
 	}
 
 	// Execute more code
-	progress, err = progress.Complete.Repl.Feed(ctx, "2 + 2")
+	progress, err = progress.(*ReplSnippetComplete).Repl.Feed(ctx, "2 + 2")
 	if err != nil {
 		t.Fatalf("feed: %v", err)
 	}
 
 	// Dump again
-	if _, err = progress.Complete.Repl.Dump(ctx); err != nil {
+	if _, err = progress.(*ReplSnippetComplete).Repl.Dump(ctx); err != nil {
 		t.Fatalf("dump 2: %v", err)
 	}
 
-	progress.Complete.Repl.Close(ctx)
+	progress.(*ReplSnippetComplete).Repl.Close(ctx)
 
 	// Restore the REPL should work
 	repl2, err := rt.LoadRepl(ctx, dump1)
@@ -566,14 +566,14 @@ func TestReplMultipleDumps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("feed after load: %v", err)
 	}
-	if progress.Kind != ReplProgressComplete {
-		t.Fatalf("expected complete, got %v", progress.Kind)
+	if progress.Kind() != ReplKindComplete {
+		t.Fatalf("expected complete, got %v", progress.Kind())
 	}
-	if progress.Complete.Result == nil {
+	if progress.(*ReplSnippetComplete).Result == nil {
 		t.Fatal("expected result")
 	}
 	var got int
-	if err := progress.Complete.Result.Decode(&got); err != nil {
+	if err := progress.(*ReplSnippetComplete).Result.Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if got != 6 {
@@ -595,23 +595,23 @@ func TestReplFunctionCallArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if progress.Kind != ReplProgressFunctionCall {
-		t.Fatalf("expected function call, got %v", progress.Kind)
+	if progress.Kind() != ReplKindFunctionCall {
+		t.Fatalf("expected function call, got %v", progress.Kind())
 	}
-	if progress.Call == nil {
+	if progress.(*ReplFunctionCall) == nil {
 		t.Fatal("expected call payload")
 	}
 
 	// Check args
-	if len(progress.Call.Args) != 2 {
-		t.Fatalf("expected 2 args, got %d", len(progress.Call.Args))
+	if len(progress.(*ReplFunctionCall).Args) != 2 {
+		t.Fatalf("expected 2 args, got %d", len(progress.(*ReplFunctionCall).Args))
 	}
 
 	var a, b int
-	if err := progress.Call.Args[0].Decode(&a); err != nil {
+	if err := progress.(*ReplFunctionCall).Args[0].Decode(&a); err != nil {
 		t.Fatalf("decode arg0: %v", err)
 	}
-	if err := progress.Call.Args[1].Decode(&b); err != nil {
+	if err := progress.(*ReplFunctionCall).Args[1].Decode(&b); err != nil {
 		t.Fatalf("decode arg1: %v", err)
 	}
 	if a != 10 || b != 20 {
@@ -619,15 +619,15 @@ func TestReplFunctionCallArgs(t *testing.T) {
 	}
 
 	// Return the sum
-	next, err := progress.Call.Return(ctx, a+b)
+	next, err := progress.(*ReplFunctionCall).Return(ctx, a+b)
 	if err != nil {
 		t.Fatalf("return: %v", err)
 	}
-	if next.Kind != ReplProgressComplete {
-		t.Fatalf("expected complete, got %v", next.Kind)
+	if next.Kind() != ReplKindComplete {
+		t.Fatalf("expected complete, got %v", next.Kind())
 	}
 	var result int
-	if err := next.Complete.Result.Decode(&result); err != nil {
+	if err := next.(*ReplSnippetComplete).Result.Decode(&result); err != nil {
 		t.Fatalf("decode result: %v", err)
 	}
 	if result != 30 {
@@ -651,20 +651,20 @@ func TestReplFullSuspendSerializeDeserializeResumeCycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start phase1: %v", err)
 	}
-	if progress1.Kind != ReplProgressFunctionCall {
-		t.Fatalf("expected function call in phase1, got %v", progress1.Kind)
+	if progress1.Kind() != ReplKindFunctionCall {
+		t.Fatalf("expected function call in phase1, got %v", progress1.Kind())
 	}
-	if progress1.Call == nil {
+	if progress1.(*ReplFunctionCall) == nil {
 		t.Fatal("expected call payload in phase1")
 	}
 
 	// Verify the function call details
-	if progress1.Call.FunctionName != "external_compute" {
-		t.Fatalf("expected external_compute, got %q", progress1.Call.FunctionName)
+	if progress1.(*ReplFunctionCall).FunctionName != "external_compute" {
+		t.Fatalf("expected external_compute, got %q", progress1.(*ReplFunctionCall).FunctionName)
 	}
 
 	// Serialize the function call snapshot
-	snapshot, err := progress1.Call.Dump(ctx)
+	snapshot, err := progress1.(*ReplFunctionCall).Dump(ctx)
 	if err != nil {
 		t.Fatalf("dump snapshot: %v", err)
 	}
@@ -673,7 +673,7 @@ func TestReplFullSuspendSerializeDeserializeResumeCycle(t *testing.T) {
 	}
 
 	// Close the snapshot
-	progress1.Call.Close(ctx)
+	progress1.(*ReplFunctionCall).Close(ctx)
 
 	// Phase 2: Create new REPL and load the serialized state
 	repl2, err := NewRepl(ctx, rt, "phase2.py")
@@ -687,19 +687,19 @@ func TestReplFullSuspendSerializeDeserializeResumeCycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start phase2: %v", err)
 	}
-	if progress2.Kind != ReplProgressFunctionCall {
-		t.Fatalf("expected function call in phase2, got %v", progress2.Kind)
+	if progress2.Kind() != ReplKindFunctionCall {
+		t.Fatalf("expected function call in phase2, got %v", progress2.Kind())
 	}
-	if progress2.Call == nil {
+	if progress2.(*ReplFunctionCall) == nil {
 		t.Fatal("expected call payload in phase2")
 	}
 
 	// Decode the arguments
 	var arg1, arg2 int
-	if err := progress2.Call.Args[0].Decode(&arg1); err != nil {
+	if err := progress2.(*ReplFunctionCall).Args[0].Decode(&arg1); err != nil {
 		t.Fatalf("decode arg1: %v", err)
 	}
-	if err := progress2.Call.Args[1].Decode(&arg2); err != nil {
+	if err := progress2.(*ReplFunctionCall).Args[1].Decode(&arg2); err != nil {
 		t.Fatalf("decode arg2: %v", err)
 	}
 	if arg1 != 40 || arg2 != 2 {
@@ -707,17 +707,17 @@ func TestReplFullSuspendSerializeDeserializeResumeCycle(t *testing.T) {
 	}
 
 	// Phase 3: Return the result (40 + 2 = 42)
-	next, err := progress2.Call.Return(ctx, 42)
+	next, err := progress2.(*ReplFunctionCall).Return(ctx, 42)
 	if err != nil {
 		t.Fatalf("return phase2: %v", err)
 	}
-	if next.Kind != ReplProgressComplete {
-		t.Fatalf("expected complete in phase2, got %v", next.Kind)
+	if next.Kind() != ReplKindComplete {
+		t.Fatalf("expected complete in phase2, got %v", next.Kind())
 	}
 
 	// Verify the final result
 	var result int
-	if err := next.Complete.Result.Decode(&result); err != nil {
+	if err := next.(*ReplSnippetComplete).Result.Decode(&result); err != nil {
 		t.Fatalf("decode result: %v", err)
 	}
 	if result != 42 {
@@ -739,18 +739,18 @@ func TestReplFunctionCallClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if progress.Kind != ReplProgressFunctionCall {
-		t.Fatalf("expected function call, got %v", progress.Kind)
+	if progress.Kind() != ReplKindFunctionCall {
+		t.Fatalf("expected function call, got %v", progress.Kind())
 	}
-	if progress.Call == nil {
+	if progress.(*ReplFunctionCall) == nil {
 		t.Fatal("expected call payload")
 	}
 
 	// Close should not panic
-	progress.Call.Close(ctx)
+	progress.(*ReplFunctionCall).Close(ctx)
 
 	// Dump after close should return error
-	_, err = progress.Call.Dump(ctx)
+	_, err = progress.(*ReplFunctionCall).Dump(ctx)
 	if err == nil {
 		t.Fatal("expected error on dump after close")
 	}
@@ -786,11 +786,11 @@ await main()
 
 	// Drive execution through NameLookup and FunctionCall yields until we get ResolveFutures
 	for {
-		switch progress.Kind {
-		case ReplProgressNameLookup:
+		switch progress.Kind() {
+		case ReplKindNameLookup:
 			// Provide function implementations for all names
-			name := progress.NameLookup.Name
-			result, err := progress.NameLookup.Return(ctx, map[string]any{
+			name := progress.(*ReplNameLookup).Name
+			result, err := progress.(*ReplNameLookup).Return(ctx, map[string]any{
 				"type": "function",
 				"name": name,
 			})
@@ -798,33 +798,33 @@ await main()
 				t.Fatalf("name lookup resume for %q: %v", name, err)
 			}
 			progress = result
-		case ReplProgressFunctionCall:
+		case ReplKindFunctionCall:
 			// Resume with a future to track this call for later resolution
-			result, err := progress.Call.ResumePending(ctx)
+			result, err := progress.(*ReplFunctionCall).ResumePending(ctx)
 			if err != nil {
 				t.Fatalf("function call resume pending: %v", err)
 			}
 			progress = result
-		case ReplProgressResolveFutures:
+		case ReplKindResolveFutures:
 			// We've reached the ResolveFutures stage
-			if progress.Futures == nil {
+			if progress.(*ReplResolveFutures) == nil {
 				t.Fatal("expected futures payload")
 			}
 			goto got_resolve_futures
-		case ReplProgressComplete:
+		case ReplKindComplete:
 			t.Fatal("unexpected complete before ResolveFutures")
 		default:
-			t.Fatalf("unexpected progress kind: %v", progress.Kind)
+			t.Fatalf("unexpected progress kind: %v", progress.Kind())
 		}
 	}
 
 got_resolve_futures:
-	if progress.Kind != ReplProgressResolveFutures {
-		t.Fatalf("expected resolve futures progress, got %v", progress.Kind)
+	if progress.Kind() != ReplKindResolveFutures {
+		t.Fatalf("expected resolve futures progress, got %v", progress.Kind())
 	}
 
 	// Dump the futures snapshot
-	snapshot, err := progress.Futures.Dump(ctx)
+	snapshot, err := progress.(*ReplResolveFutures).Dump(ctx)
 	if err != nil {
 		t.Fatalf("dump snapshot: %v", err)
 	}
@@ -833,35 +833,35 @@ got_resolve_futures:
 	}
 
 	// Close the original snapshot
-	progress.Futures.Close(ctx)
+	progress.(*ReplResolveFutures).Close(ctx)
 
 	// Load the snapshot from bytes using the same REPL's runtime
 	loadedProgress, err := repl.rt.LoadSnapshot(ctx, snapshot)
 	if err != nil {
 		t.Fatalf("load snapshot: %v", err)
 	}
-	if loadedProgress.Kind != ReplProgressResolveFutures {
-		t.Fatalf("expected resolve futures after load, got %v", loadedProgress.Kind)
+	if loadedProgress.Kind() != ReplKindResolveFutures {
+		t.Fatalf("expected resolve futures after load, got %v", loadedProgress.Kind())
 	}
-	if loadedProgress.Futures == nil {
+	if loadedProgress.(*ReplResolveFutures) == nil {
 		t.Fatal("expected futures payload after load")
 	}
 
 	// Resume using the Futures.Resume method - resolve all futures successfully
 	// The external function `foo` returns 42
-	next, err := loadedProgress.Futures.Resume(ctx, []FutureResult{
-		{CallID: loadedProgress.Futures.PendingCallIDs[0], Result: 42},
+	next, err := loadedProgress.(*ReplResolveFutures).Resume(ctx, []FutureResult{
+		{CallID: loadedProgress.(*ReplResolveFutures).PendingCallIDs[0], Result: 42},
 	})
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
-	if next.Kind != ReplProgressComplete {
-		t.Fatalf("expected complete after resume, got %v", next.Kind)
+	if next.Kind() != ReplKindComplete {
+		t.Fatalf("expected complete after resume, got %v", next.Kind())
 	}
 
 	// Verify the result
 	var got int
-	if err := next.Complete.Result.Decode(&got); err != nil {
+	if err := next.(*ReplSnippetComplete).Result.Decode(&got); err != nil {
 		t.Fatalf("decode result: %v", err)
 	}
 	if got != 42 {

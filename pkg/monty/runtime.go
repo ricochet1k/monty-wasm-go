@@ -150,11 +150,11 @@ func (r *Runtime) LoadProgram(ctx context.Context, payload []byte) (*Program, er
 func (r *Runtime) callProgress(ctx context.Context, fn api.Function, params ...uint64) (Progress, error) {
 	id, err := r.callID(ctx, fn, params...)
 	if err != nil {
-		return Progress{}, err
+		return nil, err
 	}
 	buf, err := r.readBlob(ctx, id)
 	if err != nil {
-		return Progress{}, err
+		return nil, err
 	}
 	return r.decodeProgress(buf)
 }
@@ -177,17 +177,14 @@ func (r *Runtime) decodeProgress(payload []byte) (Progress, error) {
 		ReplID           uint64              `json:"repl_id"`
 	}
 	if err := json.Unmarshal(payload, &raw); err != nil {
-		return Progress{}, fmt.Errorf("monty: decode progress: %w", err)
+		return nil, fmt.Errorf("monty: decode progress: %w", err)
 	}
 
-	progress := Progress{rawCallID: raw.CallID}
 	switch raw.Kind {
 	case "complete":
-		progress.Kind = KindComplete
-		progress.Result = append(Value{}, raw.Result...)
+		return &ProgressComplete{Result: append(Value{}, raw.Result...)}, nil
 	case "function_call":
-		progress.Kind = KindFunctionCall
-		progress.Call = &Call{
+		return &Call{
 			Name:         raw.FunctionName,
 			Args:         rawToValues(raw.Args),
 			Kwargs:       rawToKwargs(raw.Kwargs),
@@ -195,35 +192,31 @@ func (r *Runtime) decodeProgress(payload []byte) (Progress, error) {
 			Location:     raw.Location,
 			snapshotType: "function_call",
 			resume:       &snapshotResume{rt: r, snapshotID: raw.SnapshotID, callID: raw.CallID, snapshotType: "function_call"},
-		}
+		}, nil
 	case "os_call":
-		progress.Kind = KindOSCall
-		progress.OSCall = &OSCall{
+		return &OSCall{
 			Name:         raw.OSFunction,
 			Args:         rawToValues(raw.Args),
 			Kwargs:       rawToKwargs(raw.Kwargs),
 			Location:     raw.Location,
 			snapshotType: "os_call",
 			resume:       &snapshotResume{rt: r, snapshotID: raw.SnapshotID, callID: raw.CallID, snapshotType: "os_call"},
-		}
+		}, nil
 	case "resolve_futures":
-		progress.Kind = KindResolveFutures
-		progress.Futures = &PendingFutures{
+		return &PendingFutures{
 			PendingIDs: append([]uint32(nil), raw.PendingCallIDs...),
 			rt:         r,
 			snapshotID: raw.FutureSnapshotID,
-		}
+		}, nil
 	case "name_lookup":
-		progress.Kind = KindNameLookup
-		progress.NameLookup = &NameLookup{
+		return &NameLookup{
 			Name:       raw.Name,
 			snapshotID: raw.SnapshotID,
 			rt:         r,
-		}
+		}, nil
 	default:
-		return Progress{}, fmt.Errorf("monty: unknown progress kind %q", raw.Kind)
+		return nil, fmt.Errorf("monty: unknown progress kind %q", raw.Kind)
 	}
-	return progress, nil
 }
 
 // decodeReplProgress decodes REPL progress from JSON.
@@ -245,23 +238,17 @@ func (r *Runtime) decodeReplProgress(payload []byte) (ReplProgress, error) {
 		ReplID           uint64              `json:"repl_id"`
 	}
 	if err := json.Unmarshal(payload, &raw); err != nil {
-		return ReplProgress{}, fmt.Errorf("monty: decode repl progress: %w", err)
+		return nil, fmt.Errorf("monty: decode repl progress: %w", err)
 	}
 
-	progress := ReplProgress{}
 	switch raw.Kind {
 	case "complete":
-		progress.Kind = ReplProgressComplete
-		progress.Complete = &ReplSnippetComplete{
+		return &ReplSnippetComplete{
+			Repl:   &Repl{rt: r, id: raw.ReplID},
 			Result: append(Value{}, raw.Result...),
-		}
-		if raw.ReplID != 0 {
-			// TODO: this is probably always true?
-			progress.Complete.Repl = &Repl{rt: r, id: raw.ReplID}
-		}
+		}, nil
 	case "function_call":
-		progress.Kind = ReplProgressFunctionCall
-		progress.Call = &ReplFunctionCall{
+		return &ReplFunctionCall{
 			FunctionName: raw.FunctionName,
 			Args:         rawToValues(raw.Args),
 			Kwargs:       rawToKwargs(raw.Kwargs),
@@ -270,10 +257,9 @@ func (r *Runtime) decodeReplProgress(payload []byte) (ReplProgress, error) {
 			Location:     raw.Location,
 			snapshotID:   raw.SnapshotID,
 			rt:           r,
-		}
+		}, nil
 	case "os_call":
-		progress.Kind = ReplProgressOsCall
-		progress.OS = &ReplOsCall{
+		return &ReplOsCall{
 			OSFunction: raw.OSFunction,
 			Args:       rawToValues(raw.Args),
 			Kwargs:     rawToKwargs(raw.Kwargs),
@@ -281,25 +267,22 @@ func (r *Runtime) decodeReplProgress(payload []byte) (ReplProgress, error) {
 			Location:   raw.Location,
 			snapshotID: raw.SnapshotID,
 			rt:         r,
-		}
+		}, nil
 	case "resolve_futures":
-		progress.Kind = ReplProgressResolveFutures
-		progress.Futures = &ReplResolveFutures{
+		return &ReplResolveFutures{
 			PendingCallIDs: append([]uint32(nil), raw.PendingCallIDs...),
 			snapshotID:     raw.FutureSnapshotID,
 			rt:             r,
-		}
+		}, nil
 	case "name_lookup":
-		progress.Kind = ReplProgressNameLookup
-		progress.NameLookup = &ReplNameLookup{
+		return &ReplNameLookup{
 			Name:       raw.Name,
 			snapshotID: raw.SnapshotID,
 			rt:         r,
-		}
+		}, nil
 	default:
-		return ReplProgress{}, fmt.Errorf("monty: unknown repl progress kind %q", raw.Kind)
+		return nil, fmt.Errorf("monty: unknown repl progress kind %q", raw.Kind)
 	}
-	return progress, nil
 }
 
 func (r *Runtime) readBlob(ctx context.Context, blobID uint64) ([]byte, error) {
@@ -467,30 +450,30 @@ func (r *Runtime) LoadSnapshot(ctx context.Context, data []byte) (ReplProgress, 
 	// Store the data as a blob
 	dataBlobID, err := r.storeBlob(ctx, data)
 	if err != nil {
-		return ReplProgress{}, err
+		return nil, err
 	}
 	defer r.fnBlobFree.Call(context.Background(), dataBlobID)
 
 	// Get the blob pointer and length
 	ptrRes, err := r.fnBlobPtr.Call(context.Background(), dataBlobID)
 	if err != nil {
-		return ReplProgress{}, err
+		return nil, err
 	}
 	lenRes, err := r.fnBlobLen.Call(context.Background(), dataBlobID)
 	if err != nil {
-		return ReplProgress{}, err
+		return nil, err
 	}
 
 	// Call load info with pointer and length to get the JSON info blob
 	infoBlobID, err := r.callID(ctx, r.fnReplSnapshotLoadInfo, uint64(ptrRes[0]), uint64(lenRes[0]))
 	if err != nil {
-		return ReplProgress{}, err
+		return nil, err
 	}
 
 	// Read the JSON info from the blob
 	infoBlob, err := r.readBlob(ctx, infoBlobID)
 	if err != nil {
-		return ReplProgress{}, err
+		return nil, err
 	}
 
 	// Parse the JSON to get kind and snapshot_id
@@ -500,32 +483,24 @@ func (r *Runtime) LoadSnapshot(ctx context.Context, data []byte) (ReplProgress, 
 		Extra      json.RawMessage `json:"extra,omitempty"`
 	}
 	if err := json.Unmarshal(infoBlob, &info); err != nil {
-		return ReplProgress{}, err
+		return nil, err
 	}
 
 	// Load the actual snapshot
 	snapshotID, err := r.loadSnapshot(ctx, data)
 	if err != nil {
-		return ReplProgress{}, err
+		return nil, err
 	}
 
 	// Build the ReplProgress based on kind
-	progress := ReplProgress{
-		Kind:       r.kindFromString(info.Kind),
-		Call:       nil,
-		OS:         nil,
-		NameLookup: nil,
-		Futures:    nil,
-	}
-
-	switch progress.Kind {
-	case ReplProgressFunctionCall:
-		progress.Call = &ReplFunctionCall{snapshotID: snapshotID, rt: r}
-	case ReplProgressOsCall:
-		progress.OS = &ReplOsCall{snapshotID: snapshotID, rt: r}
-	case ReplProgressNameLookup:
-		progress.NameLookup = &ReplNameLookup{snapshotID: snapshotID, rt: r}
-	case ReplProgressResolveFutures:
+	switch info.Kind {
+	case "function_call":
+		return &ReplFunctionCall{snapshotID: snapshotID, rt: r}, nil
+	case "os_call":
+		return &ReplOsCall{snapshotID: snapshotID, rt: r}, nil
+	case "name_lookup":
+		return &ReplNameLookup{snapshotID: snapshotID, rt: r}, nil
+	case "resolve_futures":
 		// Parse pending_call_ids from extra field
 		var pendingCallIDs []uint32
 		if len(info.Extra) > 0 {
@@ -536,31 +511,33 @@ func (r *Runtime) LoadSnapshot(ctx context.Context, data []byte) (ReplProgress, 
 				pendingCallIDs = extra.PendingCallIDs
 			}
 		}
-		progress.Futures = &ReplResolveFutures{
+		return &ReplResolveFutures{
 			PendingCallIDs: pendingCallIDs,
 			snapshotID:     snapshotID,
 			rt:             r,
-		}
+		}, nil
+	case "complete":
+		return &ReplSnippetComplete{}, nil
+	default:
+		return nil, fmt.Errorf("monty: unknown snapshot kind %q", info.Kind)
 	}
-
-	return progress, nil
 }
 
 // kindFromString converts a string kind to ReplProgressKind
 func (r *Runtime) kindFromString(kind string) ReplProgressKind {
 	switch kind {
 	case "complete":
-		return ReplProgressComplete
+		return ReplKindComplete
 	case "function_call":
-		return ReplProgressFunctionCall
+		return ReplKindFunctionCall
 	case "os_call":
-		return ReplProgressOsCall
+		return ReplKindOsCall
 	case "name_lookup":
-		return ReplProgressNameLookup
+		return ReplKindNameLookup
 	case "resolve_futures":
-		return ReplProgressResolveFutures
+		return ReplKindResolveFutures
 	default:
-		return ReplProgressComplete
+		return ReplKindComplete
 	}
 }
 
